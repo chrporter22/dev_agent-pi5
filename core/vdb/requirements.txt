@@ -1,0 +1,9 @@
+# vdb/requirements.txt
+flask
+faiss-cpu
+numpy
+pandas
+pytest
+pytest-cov
+requests
+python-dotenv

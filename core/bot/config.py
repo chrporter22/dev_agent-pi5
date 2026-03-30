@@ -1,0 +1,11 @@
+import os
+
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+ALLOWED_USER = int(os.getenv("ALLOWED_USER"))
+SANDBOX_REPO = os.getenv("SANDBOX_REPO")
+REDIS_URL = os.getenv("REDIS_URL")
+LLM_ENDPOINT = os.getenv("LLM_ENDPOINT")
+
+RATE_LIMIT = 10
+RATE_WINDOW = 60

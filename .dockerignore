@@ -1,0 +1,117 @@
+# -------------------------------
+# Git & VCS
+# -------------------------------
+.git
+.gitignore
+.github/
+
+# -------------------------------
+# Environment / Secrets
+# -------------------------------
+.env
+.env.*
+*.pem
+*.key
+*.crt
+*.p12
+id_rsa
+id_rsa.pub
+docker.sock
+
+# -------------------------------
+# Python artifacts
+# -------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+venv/
+.venv/
+env/
+ENV/
+build/
+dist/
+*.egg-info/
+.coverage
+.pytest_cache/
+htmlcov/
+
+# -------------------------------
+# Docker / runtime artifacts
+# -------------------------------
+docker-compose.override.yml
+*.pid
+*.log
+*.tmp
+*.swp
+*.swo
+*.bak
+*.tar
+*.gz
+
+# -------------------------------
+# LLM / models / embeddings
+# -------------------------------
+core/llm/*.gguf
+core/llm/models/*
+!core/llm/models/.gitkeep
+openclaw_llm_model/
+models/
+*.gguf
+*.bin
+bot-redis-data/
+
+# -------------------------------
+# NVMe / VDB persistence
+# -------------------------------
+data/
+db.sqlite
+index.bin
+
+# -------------------------------
+# Redis
+# -------------------------------
+dump.rdb
+appendonly.aof
+
+# -------------------------------
+# Terraform
+# -------------------------------
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+terraform.tfvars
+*.auto.tfvars
+
+# -------------------------------
+# Test / Generated content
+# -------------------------------
+generated/
+tasks/*.json
+
+# -------------------------------
+# OS / IDE files
+# -------------------------------
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+# Linux
+*~
+# VSCode
+.vscode/
+# JetBrains
+.idea/
+*.iml
+
+# -------------------------------
+# Backup / temp
+# -------------------------------
+*.orig
+*.old

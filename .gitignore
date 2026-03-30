@@ -1,0 +1,120 @@
+# --------------------------------------------------
+# ENVIRONMENT / SECRETS
+# --------------------------------------------------
+.env
+.env.*
+# .env.example
+
+# Never commit private keys or tokens
+*.pem
+*.key
+*.crt
+*.p12
+id_rsa
+id_rsa.pub
+docker.sock
+
+# --------------------------------------------------
+# PYTHON
+# --------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# Test artifacts
+.coverage
+.pytest_cache/
+htmlcov/
+
+# --------------------------------------------------
+# DOCKER
+# --------------------------------------------------
+docker-compose.override.yml
+*.pid
+*.tar
+*.gz
+*.log
+*.tmp
+*.swp
+*.swo
+*.bak
+
+# LLM / model artifacts
+core/llm/*.gguf
+core/llm/models/*
+!core/llm/models/.gitkeep
+openclaw_llm_model/
+models/
+*.gguf
+*.bin
+bot-redis-data/
+
+# --------------------------------------------------
+# NVME / VDB
+# --------------------------------------------------
+data/
+db.sqlite
+index.bin
+
+# --------------------------------------------------
+# REDIS / RUNTIME FILES
+# --------------------------------------------------
+dump.rdb
+appendonly.aof
+
+# --------------------------------------------------
+# TERRAFORM (CRITICAL)
+# --------------------------------------------------
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+terraform.tfvars
+*.auto.tfvars
+
+# --------------------------------------------------
+# TEST / GENERATED CONTENT
+# --------------------------------------------------
+generated/
+tasks/*.json
+
+# --------------------------------------------------
+# OS / EDITOR
+# --------------------------------------------------
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux
+*~
+
+# VSCode
+.vscode/
+
+# JetBrains
+.idea/
+*.iml
+
+# --------------------------------------------------
+# BACKUP / TEMP
+# --------------------------------------------------
+*.orig
+*.old

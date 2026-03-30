@@ -1,0 +1,142 @@
+version: "3.9"
+
+services:
+  openclaw-bot:
+    build:
+      context: ./core/bot
+    image: openclaw/bot:${BOT_VERSION}
+    container_name: openclaw-bot
+    env_file:
+      - .env
+    networks:
+      - internal_net
+      - outbound_net
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 100
+    mem_limit: 512m
+    restart: unless-stopped
+    depends_on:
+      - bot-redis
+      - openclaw-llm
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  bot-redis:
+    image: redis:7-alpine
+    container_name: bot-redis
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD}
+      --appendonly no
+      --save ""
+    networks:
+      - internal_net
+    read_only: true
+    tmpfs:
+      - /data
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 50
+    mem_limit: 256m
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+  openclaw-llm:
+    build:
+      context: ./core/llm
+    image: openclaw/llm:${LLM_VERSION}
+    container_name: openclaw-llm
+
+    # ---- Network Isolation ----
+    networks:
+      - internal_net
+    expose:
+      - "8080"
+
+    # ---- Zero Secrets ----
+    # (intentionally no env_file)
+
+    # ---- Security Hardening ----
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    privileged: false
+    user: "1000:1000"
+
+    # ---- Resource Limits ----
+    mem_limit: 8g
+    memswap_limit: 8g
+    pids_limit: 200
+
+    # ---- Model Volume (Read-Only) ----
+    volumes:
+      - openclaw_llm_model:/models:ro
+
+    # ---- Optional: Remove DNS ----
+    dns: []
+
+    restart: unless-stopped
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  openclaw-vdb:
+    build:
+      context: ./core/vdb
+      dockerfile: Dockerfile
+    container_name: openclaw-vdb
+    restart: unless-stopped
+    networks:
+      - internal_net
+    volumes:
+      - openclaw_vdb_data:/data:rw
+    read_only: true
+    tmpfs:
+      - /tmp
+    mem_limit: 1g
+    pids_limit: 100
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "8081:8081" # optional, internal only
+    environment:
+      - VDB_API_PORT=8081
+
+volumes:
+  openclaw_vdb_data:
+    driver: local
+  openclaw_llm_model:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  internal_net:
+    driver: bridge
+    internal: true
+  
+  outbound_net:
+    driver: bridge
+
