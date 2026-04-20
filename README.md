@@ -1,3 +1,282 @@
+# MASTER TODO LIST (WITH ML WORKER INTEGRATION)
+---
+
+## Phase 1 — Core Infrastructure (must be stable first)
+
+### 1) Rebuild Docker Compose (network + ports)
+
+- Only expose: `pca-backend → 80`
+- Remove all other `ports`
+- Use `expose` for internal services
+
+Ensure:
+- `internal_net` is isolated  
+- `outbound_net` only where needed  
+
+---
+
+### 2) Normalize internal service ports
+
+- `/core/bot` → `8080`
+- `/core/llm` → `8080`
+- `/core/vdb` → `8081` (or `6333`)
+
+---
+
+### 3) Redis architecture cleanup
+
+- Replace `bot-redis` → `redis` (shared)
+
+Decide:
+- Single Redis (**recommended**)  
+- OR `redis-pca` (only if scaling later)
+
+---
+
+### 4) Rebuild core services
+
+- openclaw-bot  
+- openclaw-llm  
+- openclaw-vdb  
+
+**Goal:**
+- All services communicate internally only  
+- No host port conflicts  
+- Verified connectivity via service names  
+
+**Exact setup audit:**
+- /core/bot
+- /core/llm
+- /core/vdb
+
+Ensure:
+- Each binds to expected internal port  
+
+Then:
+- Update Dockerfiles (`EXPOSE`)  
+- Update Compose (`expose`, not `ports`)  
+
+---
+
+## Phase 2 — Data + ML Foundation (NEW SECTION)
+
+**This is where ML belongs — BEFORE backend/UI**
+
+---
+
+### 5) Scaffold ML worker container (`/core/ml`)
+
+Create base service:
+- Python (recommended)
+
+Install:
+- numpy  
+- scipy  
+- scikit-learn  
+- tensorflow-lite (or runtime)  
+
+---
+
+### 6) Implement embedding ingestion
+
+- Pull from: `openclaw-vdb`  
+- Normalize + batch embeddings  
+
+---
+
+### 7) Build PCA computation module
+
+- Covariance matrix  
+- Eigen decomposition  
+- PCA projection (PC1, PC2)  
+
+---
+
+### 8) Implement drift detection
+
+- Centroid shift  
+- Variance shift  
+
+Optional:
+- Rolling window comparison  
+
+---
+
+### 9) Implement risk scoring
+
+- Drift → probability (0–1)  
+
+Classify:
+- Low  
+- Medium  
+- High  
+- Critical  
+
+---
+
+### 10) Redis integration for ML outputs
+
+Store:
+- `pca:latest`  
+- `pca:components`  
+- `pca:variance`  
+- `drift:score`  
+- `drift:probability`  
+- `drift:classification`  
+
+---
+
+### 11) Add model training pipeline
+
+- Multiclass logistic regression (single-layer NN)  
+- Train on PCA features  
+
+Export as:
+- TensorFlow Lite  
+
+---
+
+### 12) Add model serving (inside ML worker)
+
+- Load TFLite model  
+
+Return:
+- Predictions  
+- Confidence  
+
+Store results in Redis  
+
+---
+
+### 13) Wire ML worker into Docker Compose
+
+- Service: `openclaw-ml`  
+
+Depends on:
+- vdb  
+- redis  
+
+- Internal only (no ports)  
+
+---
+
+## Phase 3 — Backend API Layer
+
+### 14) Build Node.js API service
+
+**Responsibilities:**
+- Fetch from Redis (primary)  
+- Fallback to ML worker if needed  
+
+---
+
+### 15) API endpoints
+
+- `/api/pca`  
+- `/api/drift`  
+- `/api/risk`  
+- `/api/model`  
+
+---
+
+### 16) Add Redis caching logic
+
+- Never compute PCA on request  
+- Always serve cached results  
+
+---
+
+## Phase 4 — Control Panel (pca-backend)
+
+### 17) Build `pca-backend` container
+
+- Nginx + React  
+- Bind: `80:80`  
+
+---
+
+### 18) Configure Nginx routing
+
+- `/` → React UI  
+- `/api` → Node API  
+
+---
+
+### 19) Build React dashboard
+
+- PCA scatter plot (PC1 vs PC2)  
+- Dynamic component switching  
+- Drift timeline  
+- Risk panel  
+- Covariance visualization (heat map)  
+
+---
+
+## Phase 5 — DevOps + Tooling
+
+### 20) Create repo + CI/CD
+
+- Use GitHub  
+
+Add:
+- Workflows  
+- Container builds  
+
+---
+
+### 21) Update install.sh
+
+- Fix model path for:
+  - Qwen1.5  
+
+- Ensure reproducibility  
+
+---
+
+## Phase 6 — External Integrations (LAST)
+
+### 22) Create Yahoo email
+
+---
+
+### 23) Create Telegram account
+
+---
+
+## Key Insight (critical change)
+
+ML is **NOT** part of:
+- Frontend  
+- Nginx  
+- Node API  
+
+It is a **parallel internal service** that:
+- Pulls from VDB  
+- Pushes to Redis  
+
+---
+
+## Final architecture after this TODO
+```text
+
+React UI
+↓
+pca-backend (nginx)
+↓
+node-api
+↓
+Redis ← ML Worker ← VDB
+```
+---
+## Common mistakes to avoid (now that ML is added)
+
+- Calling ML directly from React  
+- Computing PCA inside Node API  
+- Skipping Redis cache  
+- Exposing ML container ports  
+- Training model synchronously with requests
+---
+
 # DEV AGENT Pi
 
 Secure Infrastructure-as-Code AI + Analytics Stack for Raspberry Pi 5 (ARM64)
