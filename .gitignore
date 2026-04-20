@@ -2,7 +2,7 @@
 # ENVIRONMENT / SECRETS
 # --------------------------------------------------
 .env
-.env.*
+# .env.*
 # .env.example
 
 # Never commit private keys or tokens
