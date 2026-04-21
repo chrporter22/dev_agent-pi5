@@ -7,7 +7,7 @@ services:
   # ----------------------------------
   pca-backend:
     build:
-      context: ./infra/pca-backend
+      context: ./core/pca-backend
     container_name: pca-backend
     ports:
       - "80:80"
