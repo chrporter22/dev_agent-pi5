@@ -1,0 +1,251 @@
+version: "3.9"
+
+services:
+
+  # ----------------------------------
+  # INGRESS (ONLY PUBLIC ENTRYPOINT)
+  # ----------------------------------
+  pca-backend:
+    build:
+      context: ./infra/pca-backend
+    container_name: pca-backend
+    ports:
+      - "80:80"
+    networks:
+      - internal_net
+      - outbound_net
+    depends_on:
+      - node-api
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    pids_limit: 200
+    restart: unless-stopped
+
+  # ----------------------------------
+  # NODE API (READS FROM REDIS ONLY)
+  # ----------------------------------
+  node-api:
+    build:
+      context: ./core/api
+    container_name: node-api
+    env_file:
+      - .env
+    expose:
+      - "3000"
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    networks:
+      - internal_net
+    depends_on:
+      - redis
+      - openclaw-ml
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    pids_limit: 150
+    restart: unless-stopped
+
+  # ----------------------------------
+  # BOT (PRODUCER ONLY)
+  # ----------------------------------
+  openclaw-bot:
+    build:
+      context: ./core/bot
+    image: openclaw/bot:${BOT_VERSION}
+    container_name: openclaw-bot
+    env_file:
+      - .env
+    expose:
+      - "8080"
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    networks:
+      - internal_net
+      - outbound_net
+    depends_on:
+      - redis
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    pids_limit: 100
+    restart: unless-stopped
+
+  # ----------------------------------
+  # WORKER (QUEUE CONSUMER)
+  # ----------------------------------
+  openclaw-worker:
+    build:
+      context: ./core/bot
+    image: openclaw/bot:${BOT_VERSION}
+    container_name: openclaw-worker
+    command: ["python", "worker.py"]
+    env_file:
+      - .env
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - VDB_HOST=openclaw-vdb
+      - VDB_PORT=8081
+      - LLM_HOST=openclaw-llm
+      - LLM_PORT=8080
+    networks:
+      - internal_net
+    depends_on:
+      - redis
+      - openclaw-vdb
+      - openclaw-llm
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    pids_limit: 100
+    restart: unless-stopped
+
+  # ----------------------------------
+  # LLM SERVICE (NO INTERNET)
+  # ----------------------------------
+  openclaw-llm:
+    build:
+      context: ./core/llm
+    image: openclaw/llm:${LLM_VERSION}
+    container_name: openclaw-llm
+    expose:
+      - "8080"
+    networks:
+      - internal_net
+    read_only: true
+    tmpfs:
+      - /tmp
+    volumes:
+      - openclaw_llm_model:/models:ro
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    user: "1000:1000"
+    mem_limit: 8g
+    memswap_limit: 8g
+    pids_limit: 200
+    dns: []
+    restart: unless-stopped
+
+  # ----------------------------------
+  # VECTOR DATABASE (INTERNAL ONLY)
+  # ----------------------------------
+  openclaw-vdb:
+    build:
+      context: ./core/vdb
+    container_name: openclaw-vdb
+    expose:
+      - "8081"
+    networks:
+      - internal_net
+    volumes:
+      - openclaw_vdb_data:/data:rw
+    environment:
+      - VDB_API_PORT=8081
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 1g
+    pids_limit: 100
+    restart: unless-stopped
+
+  # ----------------------------------
+  # REDIS (QUEUE + CACHE)
+  # ----------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD}
+      --appendonly no
+      --save ""
+    expose:
+      - "6379"
+    networks:
+      - internal_net
+    read_only: true
+    tmpfs:
+      - /data
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    pids_limit: 50
+    restart: unless-stopped
+
+  # ----------------------------------
+  # ML WORKER (BACKGROUND ANALYTICS)
+  # ----------------------------------
+  openclaw-ml:
+    build:
+      context: ./core/ml
+    container_name: openclaw-ml
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - VDB_HOST=openclaw-vdb
+      - VDB_PORT=8081
+    networks:
+      - internal_net
+    depends_on:
+      - redis
+      - openclaw-vdb
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 2g
+    pids_limit: 150
+    restart: unless-stopped
+
+# ----------------------------------
+# VOLUMES
+# ----------------------------------
+volumes:
+  openclaw_vdb_data:
+  openclaw_llm_model:
+
+# ----------------------------------
+# NETWORKS
+# ----------------------------------
+networks:
+  internal_net:
+    driver: bridge
+    internal: true
+
+  outbound_net:
+    driver: bridge
