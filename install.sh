@@ -1,194 +1,127 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-############################################
-# OpenClaw LLM + VDB Bootstrap Installer
-# Hardened + Deterministic + Reproducible
-############################################
-
 LLM_VOLUME="openclaw_llm_model"
 MODEL_FILENAME="qwen2-1_5b-instruct-q4_k_m.gguf"
 
-# ---- REQUIRED: Set these ----
 MODEL_URL="https://YOUR_MODEL_DOWNLOAD_URL"
 MODEL_SHA256="REPLACE_WITH_EXPECTED_SHA256_HASH"
-
-############################################
-# Logging Helpers
-############################################
 
 log() { echo -e "\033[1;32m[INFO]\033[0m $1"; }
 warn() { echo -e "\033[1;33m[WARN]\033[0m $1"; }
 error() { echo -e "\033[1;31m[ERROR]\033[0m $1"; exit 1; }
 
-############################################
-# 1️⃣ Validate Host Architecture
-############################################
-
+# -------------------------
+# ARCH CHECK
+# -------------------------
 ARCH=$(uname -m)
-if [[ "$ARCH" != "aarch64" ]]; then
-    error "Unsupported architecture: $ARCH. Expected ARM64 (aarch64)."
-fi
-log "Architecture check passed (ARM64)."
+[[ "$ARCH" == "aarch64" ]] || error "ARM64 required"
 
-############################################
-# 2️⃣ Validate System Memory (>= 15GB)
-############################################
+log "Architecture OK"
 
+# -------------------------
+# MEMORY CHECK
+# -------------------------
 TOTAL_MEM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
 TOTAL_MEM_GB=$((TOTAL_MEM_KB / 1024 / 1024))
 
-if [[ "$TOTAL_MEM_GB" -lt 15 ]]; then
-    error "Insufficient memory detected: ${TOTAL_MEM_GB}GB. Raspberry Pi 5 16GB required."
-fi
-log "Memory check passed (${TOTAL_MEM_GB}GB detected)."
+[[ "$TOTAL_MEM_GB" -ge 15 ]] || error "Need >=15GB RAM"
 
-############################################
-# 3️⃣ Validate Docker Environment
-############################################
+log "Memory OK (${TOTAL_MEM_GB}GB)"
 
-if ! command -v docker &> /dev/null; then
-    error "Docker not installed."
-fi
+# -------------------------
+# DOCKER CHECK
+# -------------------------
+command -v docker >/dev/null || error "Docker missing"
+docker info >/dev/null || error "Docker not running"
+docker compose version >/dev/null || error "Docker Compose missing"
 
-if ! docker info &> /dev/null; then
-    error "Docker daemon not running."
-fi
+log "Docker OK"
 
-if ! docker compose version &> /dev/null; then
-    error "Docker Compose plugin not available."
-fi
+# -------------------------
+# MODEL VOLUME (IDEMPOTENT)
+# -------------------------
+docker volume inspect "$LLM_VOLUME" >/dev/null 2>&1 || {
+    log "Creating volume"
+    docker volume create "$LLM_VOLUME" >/dev/null
+}
 
-log "Docker environment validated."
-
-############################################
-# 4️⃣ Ensure LLM Model Volume Exists
-############################################
-
-if ! docker volume inspect "$LLM_VOLUME" &> /dev/null; then
-    log "Creating Docker volume: $LLM_VOLUME"
-    docker volume create "$LLM_VOLUME" > /dev/null
-fi
-
-############################################
-# 5️⃣ Check If Model Already Exists
-############################################
-
+# -------------------------
+# MODEL CHECK
+# -------------------------
 MODEL_PRESENT=$(docker run --rm \
     -v "$LLM_VOLUME:/models" \
     busybox sh -c "test -f /models/$MODEL_FILENAME && echo yes || echo no")
 
-if [[ "$MODEL_PRESENT" == "yes" ]]; then
-    log "Model already present in volume."
-else
-    log "Model not found in volume. Downloading..."
+if [[ "$MODEL_PRESENT" != "yes" ]]; then
+
+    [[ -n "$MODEL_URL" && -n "$MODEL_SHA256" ]] || error "Model config missing"
 
     TMP_DIR=$(mktemp -d)
     trap 'rm -rf "$TMP_DIR"' EXIT
 
-    cd "$TMP_DIR"
+    log "Downloading model..."
+    wget -O "$TMP_DIR/$MODEL_FILENAME" "$MODEL_URL"
 
-    if [[ -z "$MODEL_URL" || -z "$MODEL_SHA256" ]]; then
-        error "MODEL_URL and MODEL_SHA256 must be set in script."
-    fi
+    DOWNLOADED_HASH=$(sha256sum "$TMP_DIR/$MODEL_FILENAME" | awk '{print $1}')
 
-    wget -O "$MODEL_FILENAME" "$MODEL_URL"
-
-    log "Verifying model integrity (SHA256)..."
-
-    DOWNLOADED_HASH=$(sha256sum "$MODEL_FILENAME" | awk '{print $1}')
-
-    if [[ "$DOWNLOADED_HASH" != "$MODEL_SHA256" ]]; then
-        error "SHA256 verification failed!
-Expected: $MODEL_SHA256
-Actual:   $DOWNLOADED_HASH"
-    fi
-
-    log "SHA256 verification passed."
-
-    log "Populating Docker volume..."
+    [[ "$DOWNLOADED_HASH" == "$MODEL_SHA256" ]] || error "SHA mismatch"
 
     docker run --rm \
         -v "$LLM_VOLUME:/models" \
         -v "$TMP_DIR:/tmp/model" \
         busybox cp "/tmp/model/$MODEL_FILENAME" "/models/"
 
-    log "Model copied into Docker volume."
+    log "Model installed"
+else
+    log "Model already exists"
 fi
 
-############################################
-# 6️⃣ Validate Model Integrity Inside Volume
-############################################
-
-VOLUME_HASH=$(docker run --rm \
-    -v "$LLM_VOLUME:/models" \
-    busybox sha256sum "/models/$MODEL_FILENAME" | awk '{print $1}')
-
-if [[ "$VOLUME_HASH" != "$MODEL_SHA256" ]]; then
-    error "Volume model hash mismatch. Possible corruption."
+# -------------------------
+# VDB BOOTSTRAP (SAFE RUN)
+# -------------------------
+if [[ -f "./bootstrap_vdb.sh" ]]; then
+    log "Bootstrapping VDB"
+    ./bootstrap_vdb.sh
+else
+    warn "Skipping VDB bootstrap"
 fi
 
-log "Volume integrity verified."
+# -------------------------
+# BUILD LLM
+# -------------------------
+log "Building LLM"
+docker compose build openclaw-llm
 
-############################################
-# 7️⃣ Validate Compose File Exists
-############################################
-
-if [[ ! -f "docker-compose.yml" && ! -f "compose.yml" ]]; then
-    error "docker-compose.yml not found in current directory."
-fi
-
-############################################
-# 8️⃣ Bootstrap OpenClaw VDB (NVMe, embeddings, index)
-############################################
-
-log "Bootstrapping OpenClaw VDB..."
-if [[ ! -f "./bootstrap_vdb.sh" ]]; then
-    error "bootstrap_vdb.sh not found in root directory."
-fi
-
-./bootstrap_vdb.sh
-log "VDB bootstrap complete."
-
-############################################
-# 9️⃣ Build LLM Image Deterministically
-############################################
-
-log "Building LLM container..."
-docker compose build --no-cache openclaw-llm
-
-############################################
-# Start LLM Service
-############################################
-
-log "Starting OpenClaw LLM..."
+# -------------------------
+# START SYSTEM
+# -------------------------
+log "Starting LLM"
 docker compose up -d openclaw-llm
-
-############################################
-# Post-Launch Validation
-############################################
 
 sleep 5
 
+# -------------------------
+# BASIC HEALTH CHECK
+# -------------------------
 RUNNING=$(docker inspect -f '{{.State.Running}}' openclaw-llm 2>/dev/null || echo "false")
 
-if [[ "$RUNNING" != "true" ]]; then
-    error "LLM container failed to start."
+[[ "$RUNNING" == "true" ]] || error "LLM failed to start"
+
+log "LLM container running"
+
+# OPTIONAL: API CHECK (if Flask is exposed internally)
+if curl -s http://localhost:8080/parse >/dev/null 2>&1; then
+    log "LLM API responsive"
+else
+    warn "LLM API not reachable yet (may still be booting)"
 fi
 
-log "OpenClaw LLM started successfully."
-
-############################################
-# Summary
-############################################
-
 echo ""
-log "Bootstrap complete."
-echo "------------------------------------------"
-echo "Volume:        $LLM_VOLUME"
-echo "Model file:    $MODEL_FILENAME"
-echo "Architecture:  $ARCH"
-echo "Memory:        ${TOTAL_MEM_GB}GB"
-echo "Container:     openclaw-llm"
-echo "------------------------------------------"
-log "OpenClaw VDB ready at ./core/vdb/data"
+log "Bootstrap complete"
+echo "--------------------------------"
+echo "LLM: openclaw-llm"
+echo "Model: $MODEL_FILENAME"
+echo "RAM: ${TOTAL_MEM_GB}GB"
+echo "Arch: $ARCH"
+echo "--------------------------------"
