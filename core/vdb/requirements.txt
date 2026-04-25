@@ -1,9 +1,41 @@
-# vdb/requirements.txt
-flask
+# ==========================
+# OpenClaw VDB - Runtime Dependencies
+# ==========================
+
+# --------------------------
+# Web API layer
+# --------------------------
+fastapi
+uvicorn[standard]
+pydantic
+python-multipart
+
+# --------------------------
+# Vector DB + ML core
+# --------------------------
 faiss-cpu
 numpy
 pandas
-pytest
-pytest-cov
+scipy
+
+# --------------------------
+# Embeddings (local model support)
+# --------------------------
+sentence-transformers
+transformers
+
+# --------------------------
+# Storage layer
+# --------------------------
+sqlite-utils
+
+# --------------------------
+# External integrations
+# --------------------------
 requests
 python-dotenv
+
+# --------------------------
+# Optional ML runtime (only if used)
+# --------------------------
+# torch==2.2.0+cpu

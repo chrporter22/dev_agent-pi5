@@ -1,76 +1,82 @@
 # ==========================
-# Dockerfile: openclaw-vdb
+# Dockerfile: openclaw-vdb (FIXED)
 # ==========================
 
-# Base image: lightweight Python ARM64
 FROM python:3.12-slim-bullseye
 
 # --------------------------
 # Metadata
 # --------------------------
 LABEL maintainer="Christian Porter <cporter1993@gmail.com>"
-LABEL description="Vector Database container on Pi5. FAISS + SQLite + ARM64 embeddings."
+LABEL description="OpenClaw VDB - internal vector + SQLite + FAISS service (ARM64)"
 
 # --------------------------
 # Environment
 # --------------------------
 ENV PYTHONUNBUFFERED=1 \
-    FAISS_ENABLE_PYTHON=1 \
     VDB_DATA_DIR=/data \
-    VDB_API_PORT=8081
+    VDB_API_PORT=8081 \
+    FAISS_ENABLE_PYTHON=1
 
 WORKDIR /app
 
 # --------------------------
-# System Dependencies
+# System dependencies
 # --------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     cmake \
-    wget \
     git \
     libsqlite3-dev \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # --------------------------
-# Python Dependencies
+# Python dependencies
 # --------------------------
-# FAISS ARM64 CPU, SQLite, FastAPI + Uvicorn
-RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir \
-        faiss-cpu \
-        sqlite-utils \
-        fastapi[all] \
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir \
+        fastapi \
         uvicorn[standard] \
+        faiss-cpu \
         numpy \
         pydantic \
         python-multipart \
         python-dotenv \
+        sqlite-utils \
         sentence-transformers \
-        transformers \
-        torch==2.2.0+cpu -f https://download.pytorch.org/whl/cpu/torch_stable.html
+        transformers
+
+# NOTE:
+# torch is optional depending on your embedding strategy
+# (keep it OUT unless you actually use local transformer inference)
 
 # --------------------------
-# Copy VDB Source Code
+# Copy source
 # --------------------------
-COPY ./vdb/ /app/
-
-# Ensure /data exists and is writable
-RUN mkdir -p $VDB_DATA_DIR && chown -R 1000:1000 $VDB_DATA_DIR
+COPY ./app /app/app
+COPY ./bootstrap /app/bootstrap
 
 # --------------------------
-# Expose API port
+# Create data directory FIRST
 # --------------------------
-EXPOSE $VDB_API_PORT
+RUN mkdir -p /data
 
 # --------------------------
-# Non-root user
+# Create non-root user
 # --------------------------
-RUN useradd --create-home --uid 1000 vdbuser
+RUN useradd -m -u 1000 vdbuser && \
+    chown -R vdbuser:vdbuser /app && \
+    chown -R vdbuser:vdbuser /data
+
 USER vdbuser
 
 # --------------------------
-# Entrypoint
+# IMPORTANT: internal-only service
 # --------------------------
-# Starts FastAPI Uvicorn server on 0.0.0.0:8081
-CMD ["uvicorn", "vdb:app", "--host", "0.0.0.0", "--port", "8081", "--reload"]
+EXPOSE 8081
+
+# --------------------------
+# Entrypoint (FIXED PATH)
+# --------------------------
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8081"]

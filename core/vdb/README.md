@@ -1,68 +1,132 @@
-# VDB (Vector Database Container)
+# VDB — Vector Database Service (PRD + System Spec)
 
-Version: 1.0  
-Target: Raspberry Pi 5 (16GB RAM, ARM64, Arch Linux)  
-Internal Port: 8081  
-
----
-
-## 1. Overview
-
-VDB is a secure, NVMe-backed vector database container that provides:
-
-- Long-term semantic memory
-- Context retrieval before LLM inference
-- Token reduction
-- Deterministic similarity search
-- Zero Trust isolation
-- Persistent storage on NVMe
-
-It is **not an agent**.  
-It does **not perform inference**.  
-It does **not access GitHub or Telegram**.  
-It does **not communicate directly with the LLM**.  
-
-It is a strictly subordinate internal service.
+**Version:** 2.0  
+**System:** Distributed AI Stack  
+**Target Hardware:** Raspberry Pi 5 (ARM64 + NVMe SSD)  
+**Internal Service Port:** 8081  
+**Network Scope:** internal_net only  
+**Runtime:** Dockerized microservice  
 
 ---
 
-## 2. Architecture Role
+# 1. Overview
 
-Control Flow:
+OpenClaw VDB is a **persistent semantic memory service** designed for distributed AI workflows.
 
-Telegram  
-→ openclaw-bot  
-→ openclaw-vdb (context retrieval)  
-→ openclaw-llm (augmented prompt)  
-→ openclaw-bot  
-→ Repo B  
+core/vdb/
+│
+├── app/
+│   ├── main.py                  # FastAPI entrypoint (existing)
+│   ├── vdb.py                   # core embed/upsert/search logic (existing)
+│   ├── db.py                    # FAISS + SQLite index manager (existing)
+│   ├── models.py                # SQLite schema + insert logic (existing)
+│   ├── utils.py                 # embedding + hashing helpers (existing)
+│   ├── config.py                # environment + constants (existing)
+│
+├── scripts/
+│   ├── populate_volume.py       # NVMe preload script (existing)
+│
+├── tests/
+│   ├── test_api.py              # API unit tests (existing)
+│   ├── test_vdb.py             # core VDB logic tests (existing)
+│   ├── test_performance.py      # latency + load test (existing)
+│
+├── data/
+│   ├── instructions.json        # preload dataset (existing)
+│   ├── db.sqlite                # SQLite persistence (runtime)
+│   ├── index.bin                # FAISS serialized index (runtime)
+│
+├── Dockerfile                   # container build (existing)
+├── requirements.txt             # dependencies (existing)
+├── .env.example                 # environment config (existing)
+└── README.md                    # PRD + system documentation (this file)
 
-The VDB provides:
+It provides:
 
-- Top-K similarity search
-- Persistent long-term memory
-- Reduced token usage
-- Faster inference
-- Deterministic context retrieval
+- NVMe-backed vector persistence
+- FAISS-powered similarity search
+- SQLite as source-of-truth storage
+- Redis integration for caching + ML acceleration
+- Deterministic embedding retrieval layer
 
-LLM remains stateless.
+It is a **memory infrastructure service**, not an agent.
+
+### VDB does NOT:
+- perform LLM inference
+- execute code
+- manage queues
+- interact with external APIs
+- serve UI logic
+- communicate directly with Telegram or GitHub
+
+### VDB ONLY:
+- stores embeddings
+- retrieves semantic matches
+- maintains FAISS index
+- persists structured metadata
+- serves internal API requests
 
 ---
 
-## 3. API (Internal Only)
+# 2. System Architecture Role
 
-Base URL:
+## End-to-End System Flow
 
+```text
+Telegram
+  → openclaw-bot
+    → Redis queue: queue:jobs
+      → openclaw-worker
+        → openclaw-vdb (embed/search/upsert)
+          → SQLite (source of truth)
+          → FAISS (vector index cache)
+          → Redis (hot cache + ML layer)
+        → openclaw-ml (analysis + enrichment)
+          → Redis ml:* outputs
+            → node-api
+              → React UI
+````
+
+---
+
+## VDB Responsibilities
+
+### Core Responsibilities
+
+* Persistent embedding storage (SQLite)
+* Fast ANN search (FAISS)
+* Deterministic index rebuilds
+* Metadata persistence
+* Optional Redis cache sync
+
+### Not Responsible For
+
+* Job orchestration (worker handles this)
+* LLM inference (LLM service handles this)
+* UI/API aggregation (Node API handles this)
+* ML analytics (ML service handles this)
+
+---
+
+# 3. API Specification (Internal Only)
+
+## Base URL
+
+```
 http://openclaw-vdb:8081
+```
 
-This service is available **only on internal_net**.  
-No public port exposure.
+* internal_net only
+* no public exposure
+* no host port binding
 
 ---
 
-### POST /embed
+## POST /embed
 
-Request:
+Generate embedding vector
+
+### Request
 
 ```json
 {
@@ -70,284 +134,345 @@ Request:
 }
 ```
 
-Response:
+### Response
 
 ```json
 {
-  "embedding": [float, float, ...]
+  "embedding": [0.12, -0.44, ...]
 }
 ```
 
-Used internally before upsert.
-
 ---
 
-### POST /upsert
+## POST /upsert
 
-Request:
+Store embedding + metadata
+
+### Request
 
 ```json
 {
-  "id": "uuid",
-  "text": "Original instruction",
-  "embedding": [...],
+  "text": "Build a regression model",
   "metadata": {
-    "source": "telegram",
+    "source": "worker",
     "timestamp": 1710000000
   }
 }
 ```
 
-Behavior:
+### Behavior
 
-- Stores embedding
-- Persists metadata
-- Writes to SQLite (WAL mode)
-- Updates in-memory FAISS index
+* compute embedding (or accept precomputed)
+* write to SQLite (WAL mode)
+* update FAISS index
+* optionally update Redis cache
 
-Response:
+### Response
 
 ```json
 {
-  "status": "ok"
+  "status": "ok",
+  "id": "uuid"
 }
 ```
 
 ---
 
-### POST /search
+## POST /search
 
-Request:
+Semantic similarity search
+
+### Request
 
 ```json
 {
-  "query": "Build a CSV PCA analyzer",
+  "query": "CSV PCA analysis",
   "top_k": 5
 }
 ```
 
-Response:
+### Response
 
 ```json
 {
   "matches": [
     {
-      "id": "...",
-      "score": 0.89,
+      "id": "uuid",
+      "score": 0.91,
       "text": "...",
-      "metadata": {...}
+      "metadata": {
+        "source": "worker"
+      }
     }
   ]
 }
 ```
 
-Constraints:
+### Constraints
 
-- Cosine similarity search
-- Deterministic ranking
-- top_k capped at 10
-- Latency target < 50ms for 10k entries
+* cosine similarity (FAISS IndexFlatIP)
+* top_k max: 10
+* target latency: < 50ms (warm index)
 
 ---
 
-### GET /health
-
-Response:
+## GET /health
 
 ```json
 {
   "status": "healthy",
-  "index_size": 1245
+  "index_size": 1245,
+  "redis_connected": true
 }
 ```
 
 ---
 
-## 4. Storage
+# 4. Storage Architecture
 
-Docker Volume:
+## 4.1 Source of Truth (Primary)
 
-openclaw_vdb_data
+```
+/data/db.sqlite
+```
 
-Mounted at:
+Stores:
 
-/data
-
-Files stored:
-
-- /data/db.sqlite
-- /data/index.bin
-- SQLite WAL files
-
-All persistent data stored on NVMe.
-
-No host bind mounts inside container.
+* embeddings
+* raw text
+* metadata
+* timestamps
 
 ---
 
-## 5. Startup Flow
+## 4.2 Vector Index (Derived Cache)
 
-On container startup:
+```
+/data/index.bin
+```
 
-1. Validate /data directory
-2. Initialize SQLite database
-3. Enable WAL mode
-4. Load all embeddings
-5. Rebuild FAISS index
+Stores:
+
+* FAISS index state
+* ID mapping
+* search acceleration structure
+
+---
+
+## 4.3 Redis Layer (Acceleration Layer)
+
+Redis is used for:
+
+* caching search results
+* storing ML outputs
+* reducing FAISS load
+* storing hot query results
+
+### Example keys
+
+```
+cache:vdb:search:<hash>
+ml:vdb:drift
+ml:vdb:pca
+ml:vdb:embedding_hot
+```
+
+---
+
+# 5. Startup Lifecycle
+
+On container boot:
+
+1. Validate `/data`
+2. Initialize SQLite (WAL mode enabled)
+3. Load embeddings from SQLite
+4. Rebuild FAISS index
+5. Connect Redis (if available)
 6. Load embedding model
-7. Enter ready state
-
-Startup target:  
-< 3 seconds for 10k entries
+7. Warm cache (optional)
+8. Enter ready state
 
 ---
 
-## 6. Security Model (Zero Trust)
+## Startup Target
 
-Container Hardening:
-
-- Non-root user
-- read_only: true
-- Writable only /data
-- cap_drop: ALL
-- security_opt: no-new-privileges:true
-- mem_limit: 1GB
-- pids_limit: 100
-- No docker.sock
-- No privileged mode
-- No outbound internet
-- No public ports
-- internal_net only
-
-Network Policy:
-
-- Accessible from:
-  - openclaw-bot
-  - pca-backend
-- Not accessible from:
-  - openclaw-llm
-  - Internet
-  - Host network
-
-VDB cannot:
-
-- Access GitHub
-- Access Telegram
-- Access Repo A or Repo B
-- Execute shell commands
-- Mount new volumes
-- Perform inference
-
-VDB only:
-
-- Accepts embedding/search requests
-- Stores vectors
-- Returns similarity matches
+* < 3 seconds for 10k embeddings
+* deterministic rebuild from SQLite
 
 ---
 
-## 7. Memory Budget
+# 6. Data Consistency Model
 
-Container memory limit: 1GB
+## Source of Truth Hierarchy
 
-Expected usage:
-
-- Embedding model: ~200MB
-- FAISS index (10k entries): ~200MB
-- SQLite + WAL + API: ~200MB
-
-Target steady state:
-
-< 600MB
-
-System-wide container peak target:
-
-< 13GB
+```
+SQLite (truth)
+   ↓
+FAISS (derived index)
+   ↓
+Redis (cache layer)
+```
 
 ---
 
-## 8. NVMe Requirements
+## Recovery Rules
 
-Hardware:
+### If FAISS is lost or corrupted:
 
-- Raspberry Pi 5
-- PCIe M.2 HAT
-- NVMe SSD
-- PCIe Gen 2 enabled
+```
+Rebuild ONLY from SQLite
+```
 
-Target performance:
+### NEVER:
 
-- ~400–500 MB/s sequential
-- Low latency random reads
-- Stable sustained write performance
-
-Example host mount:
-
-/mnt/nvme/openclaw_vdb
-
-Docker named volume backed by NVMe.
+* rebuild from FAISS ❌
+* treat Redis as persistent ❌
 
 ---
 
-## 9. Token Optimization Strategy
+# 7. Security Model (Zero Trust Internal Service)
 
-Instead of sending entire chat history:
+## Container Hardening
 
-- Retrieve top 3–5 semantically similar instructions
-- Inject concise context
-- Keep prompt under ~800 tokens
-- Preserve ~1200 tokens for generation
-
-Benefits:
-
-- Reduced memory pressure
-- Lower latency
-- Prevent context overflow
-- Deterministic retrieval
+* non-root execution
+* read-only root filesystem
+* only `/data` writable
+* cap_drop: ALL
+* no-new-privileges
+* memory limited (1GB)
+* internal network only
 
 ---
 
-## 10. Acceptance Criteria
+## Network Isolation
 
-Deployment:
+### Allowed:
 
-- Runs as non-root
-- Root filesystem read-only
-- Only /data writable
-- Attached only to internal_net
-- No exposed ports
-- NVMe persistence verified
+* openclaw-worker
+* node-api
 
-Functional:
+### Denied:
 
-- Embeddings stored correctly
-- Similarity search accurate
-- Retrieval latency < 50ms (10k entries)
-- Data survives restart
-- Context injected before inference
-
-Security:
-
-- No outbound internet
-- No secret environment variables
-- No access to LLM
-- No access to GitHub or Telegram
-
-Performance:
-
-- Memory < 1GB
-- System peak < 13GB
-- Stable NVMe read/write
-- Index rebuild successful on restart
+* internet access
+* GitHub
+* Telegram
+* LLM service direct calls
+* host network access
 
 ---
 
-## 11. Design Philosophy
+# 8. Performance Targets
 
-- Deterministic
-- Persistent
-- Fast
-- Memory-efficient
-- Non-autonomous
-- Strictly subordinate service
-- NVMe-accelerated semantic memory layer
+## Search
+
+* < 50ms (warm index)
+* FAISS IP optimized
+
+## Ingestion
+
+* < 20ms per upsert (excluding embedding generation)
+
+## Memory
+
+* target steady state: < 600MB
+* max container: 1GB
+
+---
+
+# 9. NVMe Storage Requirements
+
+* Raspberry Pi 5 + PCIe NVMe HAT
+* mounted persistent volume at `/data`
+* expected throughput: 300–500MB/s
+
+---
+
+# 10. ML + Redis Integration Layer
+
+VDB emits events to Redis for downstream ML services:
+
+```
+ml:vdb:embedding_updated
+ml:vdb:drift_score
+ml:vdb:search_stats
+```
+
+---
+
+## ML Responsibilities (External Service)
+
+* PCA analysis
+* drift detection
+* clustering
+* embedding quality scoring
+
+VDB ONLY stores results.
+
+---
+
+# 11. System Design Principles
+
+* deterministic rebuilds
+* SQLite = source of truth
+* FAISS = disposable acceleration layer
+* Redis = cache only
+* no external dependencies at runtime
+* strict separation of concerns
+* stateless API layer over persistent storage
+
+---
+
+# 12. Acceptance Criteria
+
+## Functional
+
+* embeddings persist across restarts
+* FAISS rebuilds correctly from SQLite
+* search returns deterministic results
+* Redis cache integration is optional and safe
+
+---
+
+## Performance
+
+* < 50ms search latency (warm)
+* stable ingestion under load
+* no memory leaks
+
+---
+
+## Reliability
+
+* full recovery after crash
+* index always rebuildable from SQLite
+* no dependency on Redis for correctness
+
+---
+
+## Security
+
+* no outbound internet access
+* no exposed ports externally
+* internal-only service access
+* no secret leakage in logs
+
+---
+
+# 13. Design Philosophy
+
+A deterministic, NVMe-accelerated semantic memory engine for distributed AI systems.
+
+It is:
+
+* not an agent
+* not an inference engine
+* not a cache-only layer
+
+It is the **memory backbone** of the system enabling:
+
+* fast LLM context injection
+* reduced token usage
+* persistent semantic memory
+* distributed AI coordination via Redis
+
+---
