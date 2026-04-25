@@ -1,42 +1,7 @@
 # MASTER TODO LIST (WITH ML WORKER INTEGRATION)
 ---
-
-## Phase 1 — Core Infrastructure (must be stable first)
-
-### 1) Rebuild Docker Compose (network + ports)
-
-- Only expose: `pca-backend → 80`
-- Remove all other `ports`
-- Use `expose` for internal services
-
-Ensure:
-- `internal_net` is isolated  
-- `outbound_net` only where needed  
-
----
-
-### 2) Normalize internal service ports
-
-- `/core/bot` → `8080`
-- `/core/llm` → `8080`
-- `/core/vdb` → `8081` (or `6333`)
-
----
-
-### 3) Redis architecture cleanup
-
-- Replace `bot-redis` → `redis` (shared)
-
-Decide:
-- Single Redis (**recommended**)  
-- OR `redis-pca` (only if scaling later)
-
----
-
 ### 4) Rebuild core services
 
-- openclaw-bot  
-- openclaw-llm  
 - openclaw-vdb  
 
 **Goal:**

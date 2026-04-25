@@ -1,10 +1,9 @@
 #!/bin/bash
 set -e
 
-MODEL_PATH="/models/qwen2-1_5b-instruct-q4_k_m.gguf"
+MODEL_PATH="${MODEL_PATH:-/models/qwen2-1_5b-instruct-q4_k_m.gguf}"
 CTX_SIZE=2048
 THREADS=6
-PORT=8080
 
 if [ ! -f "$MODEL_PATH" ]; then
   echo "Model not found at $MODEL_PATH"
@@ -13,7 +12,9 @@ fi
 
 echo "Starting llama.cpp server..."
 
-# Start llama.cpp HTTP server in background
+# ---------------------------
+# START llama.cpp SERVER
+# ---------------------------
 ./llama.cpp/server \
   --model "$MODEL_PATH" \
   --ctx-size $CTX_SIZE \
@@ -24,10 +25,27 @@ echo "Starting llama.cpp server..."
 
 LLAMA_PID=$!
 
-echo "Starting Flask wrapper..."
+echo "llama.cpp PID: $LLAMA_PID"
 
-# Start Flask wrapper (LLM gateway)
-python3 app.py
+# ---------------------------
+# SIGNAL HANDLING (CRITICAL FIX)
+# ---------------------------
+cleanup() {
+  echo "Shutting down llama.cpp..."
+  kill $LLAMA_PID || true
+  exit 0
+}
 
-# Cleanup
-kill $LLAMA_PID
+trap cleanup SIGTERM SIGINT
+
+echo "Starting Flask LLM gateway..."
+
+# ---------------------------
+# START FLASK (BLOCKING)
+# ---------------------------
+python3 app.py &
+
+FLASK_PID=$!
+
+# Wait for either process to exit
+wait $FLASK_PID

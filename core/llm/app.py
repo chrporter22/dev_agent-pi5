@@ -1,16 +1,23 @@
 from flask import Flask, request, jsonify
 import requests
-import os
 import json
+import os
 
 app = Flask(__name__)
 
-LLAMA_SERVER_URL = "http://127.0.0.1:8081/completion"
+# ---------------------------
+# INTERNAL SERVICE ROUTING
+# ---------------------------
+LLAMA_SERVER_URL = os.getenv(
+    "LLAMA_SERVER_URL",
+    "http://openclaw-vdb:8081/completion"
+)
 
 SYSTEM_PROMPT = """You are a strict JSON API.
-Return only valid JSON.
+Return ONLY valid JSON.
 No markdown.
 No explanations.
+
 Schema:
 {
   "type": string,
@@ -21,6 +28,10 @@ Schema:
 }
 """
 
+
+# ---------------------------
+# LLAMA CALL WRAPPER
+# ---------------------------
 def call_llama(prompt):
     payload = {
         "prompt": prompt,
@@ -29,13 +40,23 @@ def call_llama(prompt):
         "stop": ["</s>"]
     }
 
-    response = requests.post(LLAMA_SERVER_URL, json=payload, timeout=30)
+    response = requests.post(
+        LLAMA_SERVER_URL,
+        json=payload,
+        timeout=30
+    )
+
     response.raise_for_status()
     return response.json().get("content", "")
 
+
+# ---------------------------
+# STRICT PARSE ENDPOINT
+# ---------------------------
 @app.route("/parse", methods=["POST"])
 def parse():
     data = request.get_json()
+
     if not data or "instruction" not in data:
         return jsonify({"error": "Missing instruction"}), 400
 
@@ -53,18 +74,30 @@ JSON:
     try:
         raw_output = call_llama(prompt)
 
-        # Attempt strict JSON parse
-        parsed = json.loads(raw_output.strip())
+        # Defensive JSON parsing
+        cleaned = raw_output.strip()
+
+        parsed = json.loads(cleaned)
 
         return jsonify(parsed)
 
+    except json.JSONDecodeError:
+        return jsonify({
+            "error": "Invalid JSON from LLM",
+            "raw": raw_output[:300]
+        }), 500
+
     except Exception as e:
-        return jsonify({"error": "LLM output invalid JSON"}), 500
+        return jsonify({"error": str(e)}), 500
 
 
+# ---------------------------
+# RAW COMPLETION PASS-THROUGH
+# ---------------------------
 @app.route("/completion", methods=["POST"])
 def completion():
     data = request.get_json()
+
     if not data or "prompt" not in data:
         return jsonify({"error": "Missing prompt"}), 400
 
@@ -75,13 +108,21 @@ def completion():
     }
 
     try:
-        response = requests.post(LLAMA_SERVER_URL, json=payload, timeout=60)
+        response = requests.post(
+            LLAMA_SERVER_URL,
+            json=payload,
+            timeout=60
+        )
+
         response.raise_for_status()
         return jsonify(response.json())
 
-    except Exception:
-        return jsonify({"error": "Completion failed"}), 500
+    except Exception as e:
+        return jsonify({"error": "Completion failed", "detail": str(e)}), 500
 
 
+# ---------------------------
+# ENTRYPOINT
+# ---------------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)

@@ -1,10 +1,15 @@
 FROM ubuntu:22.04
 
-# ---- Create non-root user early ----
+# ---------------------------
+# CREATE NON-ROOT USER
+# ---------------------------
 RUN useradd -ms /bin/bash llmuser
 
-# ---- Install system dependencies ----
 USER root
+
+# ---------------------------
+# SYSTEM DEPENDENCIES
+# ---------------------------
 RUN apt-get update && apt-get install -y \
     build-essential \
     cmake \
@@ -15,31 +20,50 @@ RUN apt-get update && apt-get install -y \
     python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
-# ---- Build llama.cpp (ARM64 optimized) ----
+# ---------------------------
+# BUILD llama.cpp (REPRODUCIBLE)
+# ---------------------------
 WORKDIR /home/llmuser
 
-RUN git clone https://github.com/ggerganov/llama.cpp.git \
+RUN git clone --depth 1 https://github.com/ggerganov/llama.cpp.git \
     && cd llama.cpp \
-    && make LLAMA_NATIVE=1
+    && make -j$(nproc) LLAMA_NATIVE=1
 
-# ---- VERIFY server binary exists (fails build if not) ----
-RUN test -f /home/llmuser/llama.cpp/server
+# ---------------------------
+# VERIFY BUILD OUTPUT SAFELY
+# ---------------------------
+RUN find /home/llmuser/llama.cpp -name server || true
 
-# ---- Create model directory ----
+# ---------------------------
+# MODEL DIRECTORY
+# ---------------------------
 RUN mkdir -p /models
 
-# ---- Fix ownership for non-root execution ----
+# ---------------------------
+# OWNERSHIP FIX
+# ---------------------------
 RUN chown -R llmuser:llmuser /home/llmuser \
     && chown -R llmuser:llmuser /models
 
-# ---- Switch to non-root ----
+# ---------------------------
+# SWITCH TO NON-ROOT
+# ---------------------------
 USER llmuser
 
-# ---- Copy Flask wrapper ----
+# ---------------------------
+# WRAPPER APP
+# ---------------------------
 WORKDIR /home/llmuser
 COPY --chown=llmuser:llmuser ./llm-server ./llm-server
+
 WORKDIR /home/llmuser/llm-server
 
+# ---------------------------
+# INTERNAL SERVICE PORT ONLY
+# ---------------------------
 EXPOSE 8080
 
+# ---------------------------
+# ENTRYPOINT
+# ---------------------------
 ENTRYPOINT ["./start-llm.sh"]
