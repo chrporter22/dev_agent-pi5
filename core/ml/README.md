@@ -1,3 +1,161 @@
+# OPENCLAW ML INTEGRATION TODO — SYSTEM FIXES
+
+==================================================
+1. VDB ENDPOINT CONTRACT (CRITICAL)
+==================================================
+
+Define a stable embedding retrieval API for ML worker.
+
+CURRENT ISSUE:
+ML assumes: GET /embeddings
+BUT no schema, batching, or contract exists.
+
+TASKS:
+
+- Define embedding response schema
+- Define pagination strategy
+- Define batch size support
+- Decide filtering strategy (time-based / type-based / full scan)
+
+CHOOSE IMPLEMENTATION:
+
+Option A (REST):
+GET /embeddings?limit=128
+
+Option B (Batch endpoint):
+GET /batch_embeddings
+
+Option C (RECOMMENDED — FASTEST):
+Redis-backed direct fetch:
+- ML reads embeddings directly from Redis lists/sets
+
+DELIVERABLE:
+- documented VDB contract
+- stable response format
+- guaranteed non-empty behavior
+
+==================================================
+2. REDIS KEY STANDARDIZATION (CRITICAL)
+==================================================
+
+CURRENT ISSUE:
+ML writes data but Node API does not formally expose it.
+
+EXISTING KEYS:
+- model:latest
+- pca:latest
+- drift:score
+
+TASKS:
+
+Ensure Node API exposes ML state:
+
+/api/ml/pca
+/api/ml/drift
+/api/ml/risk
+/api/ml/model
+
+DELIVERABLE:
+- Node API routes mapped to Redis keys
+- consistent response schema
+- no direct ML computation in API
+
+==================================================
+3. INITIAL BOOTSTRAP STATE (CRITICAL)
+==================================================
+
+CURRENT ISSUE:
+First ML run has no data → unstable outputs.
+
+TASKS:
+
+- Handle empty embedding state safely:
+
+  if embeddings.size == 0:
+      skip cycle
+
+- Ensure minimum embedding threshold (>=2 samples)
+- Initialize baseline drift reference after first valid run
+
+DELIVERABLE:
+- stable first-run behavior
+- no NaN drift values
+- no invalid PCA computation
+
+==================================================
+4. MODEL FILE SYSTEM SAFETY (CRITICAL)
+==================================================
+
+CURRENT ISSUE:
+/ app/models may not exist inside container.
+
+TASKS:
+
+- Ensure directory exists at runtime:
+  os.makedirs("/app/models", exist_ok=True)
+
+- Confirm Docker volume or filesystem mount
+
+DELIVERABLE:
+- safe TFLite export
+- safe metadata writes
+- no silent file failure
+
+==================================================
+5. NODE API ARCHITECTURE RULE (CRITICAL)
+==================================================
+
+CURRENT ISSUE:
+Node API must remain read-only for ML outputs.
+
+TASKS:
+
+- Node API must ONLY read Redis
+- Node API must NEVER trigger ML computations
+- ML remains async batch system (~30s cycle)
+
+DELIVERABLE:
+- strict separation of concerns
+- no synchronous ML calls
+- cached-only API responses
+
+==================================================
+6. OPTIONAL SYSTEM STABILITY IMPROVEMENTS
+==================================================
+
+TASKS:
+
+Add ML observability keys:
+
+- ml:heartbeat
+- ml:version
+- ml:last_run
+
+Example:
+redis_client.set("ml:heartbeat", int(time.time()), ex=60)
+
+BENEFIT:
+- system monitoring
+- crash detection
+- lifecycle tracking
+
+==================================================
+7. FINAL PRIORITY SUMMARY
+==================================================
+
+CRITICAL FIXES (must implement):
+- VDB embedding contract
+- Redis key + Node API mapping
+- empty embedding bootstrap handling
+- /app/models directory safety
+
+SHOULD FIX:
+- Node API ML exposure layer
+- embedding minimum threshold logic
+
+OPTIONAL:
+- ML heartbeat + version tracking
+
 # OPENCLAW ML WORKER — PRODUCT REQUIREMENTS DOCUMENT (PRD)
 
 Version: 1.0  

@@ -25,13 +25,22 @@ from redis_store import (
     store_value
 )
 
+from config import (
+    ML_WORKER_SLEEP,
+    ENABLE_PCA,
+    ENABLE_DRIFT_DETECTION,
+    ENABLE_MODEL_TRAINING
+)
 
 def process_embeddings():
 
     embeddings = fetch_embeddings()
 
-    if embeddings.size == 0:
-        print("No embeddings available.")
+    # ----------------------------------
+    # SAFE STARTUP / EMPTY STATE GUARD
+    # ----------------------------------
+    if embeddings is None or embeddings.size == 0:
+        print("No embeddings yet — skipping cycle")
         return
 
     # ---------------- PCA ----------------
@@ -99,13 +108,54 @@ def main():
 
         try:
 
+# /core/ml/model_trainer.py
+
+import numpy as np
+import tensorflow as tf
+
+from sklearn.linear_model import LogisticRegression
+
+
+def train_model(features, labels):
+
+    model = LogisticRegression(
+        multi_class="multinomial",
+        max_iter=1000
+    )
+
+    model.fit(features, labels)
+
+    return model
+
+
+def export_tflite():
+
+    model = tf.keras.Sequential([
+        tf.keras.layers.Dense(
+            4,
+            activation="softmax",
+            input_shape=(2,)
+        )
+    ])
+
+    converter = tf.lite.TFLiteConverter.from_keras_model(
+        model
+    )
+
+    tflite_model = converter.convert()
+
+    with open(
+        "/app/models/risk_model.tflite",
+        "wb"
+    ) as f:
+        f.write(tflite_model)
             process_embeddings()
 
         except Exception as e:
 
             print(f"ML worker error: {e}")
 
-        time.sleep(30)
+        time.sleep(ML_WORKER_SLEEP)
 
 
 if __name__ == "__main__":
