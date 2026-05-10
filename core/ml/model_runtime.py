@@ -9,7 +9,12 @@ from config import MODEL_PATH
 class RiskModel:
 
     def __init__(self):
-
+        
+        if not os.path.exists(MODEL_PATH):
+            raise FileNotFoundError(
+                f"Missing model: {MODEL_PATH}"
+            )
+        
         self.interpreter = tflite.Interpreter(
             model_path=MODEL_PATH
         )

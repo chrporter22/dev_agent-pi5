@@ -1,105 +1,208 @@
-# OPENCLAW ML INTEGRATION TODO — SYSTEM FIXES
+# TODO — NODE API 
 
 ==================================================
-1. VDB ENDPOINT CONTRACT (CRITICAL)
+1. PURPOSE
 ==================================================
 
-Define a stable embedding retrieval API for ML worker.
-
-CURRENT ISSUE:
-ML assumes: GET /embeddings
-BUT no schema, batching, or contract exists.
-
-TASKS:
-
-- Define embedding response schema
-- Define pagination strategy
-- Define batch size support
-- Decide filtering strategy (time-based / type-based / full scan)
-
-CHOOSE IMPLEMENTATION:
-
-Option A (REST):
-GET /embeddings?limit=128
-
-Option B (Batch endpoint):
-GET /batch_embeddings
-
-Option C (RECOMMENDED — FASTEST):
-Redis-backed direct fetch:
-- ML reads embeddings directly from Redis lists/sets
-
-DELIVERABLE:
-- documented VDB contract
-- stable response format
-- guaranteed non-empty behavior
+Add Redis-backed ML endpoints to pca-backend so React dashboard can fetch all PCA + ML data.
 
 ==================================================
-2. REDIS KEY STANDARDIZATION (CRITICAL)
+2. BACKEND STRUCTURE CHANGE
 ==================================================
 
-CURRENT ISSUE:
-ML writes data but Node API does not formally expose it.
+Create folder structure:
 
-EXISTING KEYS:
-- model:latest
+pca-backend/
+├── routes/
+│   └── ml.ts
+
+==================================================
+3. CREATE ML ROUTES FILE
+==================================================
+
+FILE:
+pca-backend/routes/ml.ts
+
+TASK:
+Create Express router connected to Redis.
+
+SETUP:
+- import express
+- import ioredis
+- create router instance
+- connect Redis using REDIS_URL env var
+
+==================================================
+4. ADD PCA SUMMARY ENDPOINT (CRITICAL)
+==================================================
+
+CREATE ROUTE:
+
+GET /api/ml/pca/summary
+
+FUNCTION:
+Return all PCA + ML metrics in ONE response.
+
+FETCH FROM REDIS:
 - pca:latest
+- pca:components
+- pca:variance
+- pca:eigenvalues
+- pca:total_variance
 - drift:score
+- model:prediction
+- model:confidence
 
-TASKS:
+RETURN JSON:
 
-Ensure Node API exposes ML state:
+{
+  projection,
+  components,
+  variance,
+  eigenvalues,
+  totalVariance,
+  drift,
+  risk,
+  confidence
+}
 
-/api/ml/pca
+==================================================
+5. ADD PCA HISTORY ENDPOINT
+==================================================
+
+GET /api/ml/pca/history
+
+TASK:
+- read list from Redis key: pca:history
+- return parsed JSON array
+- limit to last 100 entries
+
+==================================================
+6. ADD INDIVIDUAL PCA ENDPOINTS
+==================================================
+
+Create these endpoints:
+
+GET /api/ml/pca/projection
+GET /api/ml/pca/components
+GET /api/ml/pca/variance
+GET /api/ml/pca/eigenvalues
+
+Each one:
+- reads Redis key
+- JSON.parse safely
+- returns array
+
+==================================================
+7. ADD DRIFT ENDPOINT
+==================================================
+
+GET /api/ml/drift
+
+FETCH:
+- drift:score
+- drift:classification
+
+RETURN:
+{
+  drift,
+  classification
+}
+
+==================================================
+8. ADD RISK ENDPOINT
+==================================================
+
+GET /api/ml/risk
+
+FETCH:
+- model:prediction
+- model:confidence
+
+RETURN:
+{
+  prediction,
+  confidence
+}
+
+==================================================
+9. MOUNT ROUTES IN BACKEND ENTRYPOINT
+==================================================
+
+FILE:
+pca-backend/index.ts
+
+ADD IMPORT:
+
+import mlRoutes from "./routes/ml"
+
+MOUNT:
+
+app.use("/api/ml", mlRoutes)
+
+==================================================
+10. FINAL SYSTEM FLOW
+==================================================
+
+ML Worker
+   ↓
+Redis
+   ├── pca:latest
+   ├── pca:history
+   ├── pca:variance
+   ├── pca:eigenvalues
+   ├── pca:total_variance
+   ├── drift:score
+   ├── model:prediction
+   └── model:confidence
+
+   ↓
+
+pca-backend (Node API)
+   ↓
+/api/ml/pca/summary
+/api/ml/pca/history
+/api/ml/pca/projection
+/api/ml/pca/components
+/api/ml/pca/variance
+/api/ml/pca/eigenvalues
 /api/ml/drift
 /api/ml/risk
-/api/ml/model
 
-DELIVERABLE:
-- Node API routes mapped to Redis keys
-- consistent response schema
-- no direct ML computation in API
+   ↓
+
+React Dashboard
 
 ==================================================
-3. INITIAL BOOTSTRAP STATE (CRITICAL)
+11. CRITICAL FRONTEND ENDPOINT
 ==================================================
 
-CURRENT ISSUE:
-First ML run has no data → unstable outputs.
+PRIMARY ENDPOINT:
 
-TASKS:
+GET /api/ml/pca/summary
 
-- Handle empty embedding state safely:
+USE CASE:
+Single request for full dashboard rendering.
 
-  if embeddings.size == 0:
-      skip cycle
-
-- Ensure minimum embedding threshold (>=2 samples)
-- Initialize baseline drift reference after first valid run
-
-DELIVERABLE:
-- stable first-run behavior
-- no NaN drift values
-- no invalid PCA computation
+INCLUDES:
+- PCA projection (for scatter plot)
+- variance (for bar chart)
+- drift (for anomaly UI)
+- confidence (for UI glow)
+- risk level (for status color)
 
 ==================================================
-4. MODEL FILE SYSTEM SAFETY (CRITICAL)
+12. FRONTEND BENEFIT
 ==================================================
 
-CURRENT ISSUE:
-/ app/models may not exist inside container.
+This enables:
 
-TASKS:
-
-- Ensure directory exists at runtime:
-  os.makedirs("/app/models", exist_ok=True)
-
-- Confirm Docker volume or filesystem mount
-
-DELIVERABLE:
-- safe TFLite export
-- safe metadata writes
-- no silent file failure
+- single-fetch dashboard updates
+- smooth 5-second polling
+- viridis-based PCA visualization
+- real-time drift overlays
+- animated latent space rendering
+- reduced API latency and complexity
 
 ==================================================
 5. NODE API ARCHITECTURE RULE (CRITICAL)
@@ -155,6 +258,10 @@ SHOULD FIX:
 
 OPTIONAL:
 - ML heartbeat + version tracking
+
+
+# End TODO LIST
+
 
 # OPENCLAW ML WORKER — PRODUCT REQUIREMENTS DOCUMENT (PRD)
 

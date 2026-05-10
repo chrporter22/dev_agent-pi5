@@ -59,7 +59,7 @@ MODEL_METADATA_PATH = "/app/models/model_metadata.json"
 INFERENCE_BATCH_SIZE = 1
 
 # ML LOOP INTERVAL (seconds)
-ML_WORKER_SLEEP = 30
+ML_WORKER_SLEEP = 5 
 
 
 # --------------------------------------------------
