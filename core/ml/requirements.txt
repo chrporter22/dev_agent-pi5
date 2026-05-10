@@ -1,0 +1,10 @@
+# /core/ml/requirements.txt
+
+numpy
+scipy
+scikit-learn
+tensorflow
+tflite-runtime
+redis
+requests
+joblib

@@ -212,31 +212,43 @@ services:
   # ----------------------------------
   # ML WORKER (BACKGROUND ANALYTICS)
   # ----------------------------------
-  openclaw-ml:
-    build:
-      context: ./core/ml
-    container_name: openclaw-ml
-    environment:
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - VDB_HOST=openclaw-vdb
-      - VDB_PORT=8081
-    networks:
-      - internal_net
-    depends_on:
-      - redis
-      - openclaw-vdb
-    read_only: true
-    tmpfs:
-      - /tmp
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    mem_limit: 2g
-    pids_limit: 150
-    restart: unless-stopped
+openclaw-ml:
+  build:
+    context: ./core/ml
 
+  container_name: openclaw-ml
+
+  environment:
+    - REDIS_HOST=redis
+    - REDIS_PORT=6379
+    - VDB_HOST=openclaw-vdb
+    - VDB_PORT=8081
+    - PYTHONUNBUFFERED=1
+
+  networks:
+    - internal_net
+
+  depends_on:
+    - redis
+    - openclaw-vdb
+
+  read_only: true
+
+  tmpfs:
+    - /tmp
+    - /app/data
+
+  cap_drop:
+    - ALL
+
+  security_opt:
+    - no-new-privileges:true
+
+  mem_limit: 2g
+
+  pids_limit: 150
+
+  restart: unless-stopped
 # ----------------------------------
 # VOLUMES
 # ----------------------------------
