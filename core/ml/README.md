@@ -1,19 +1,3 @@
-/core/ml
-├── Dockerfile
-├── requirements.txt
-├── config.py
-├── ml_worker.py
-├── embedding_client.py
-├── pca_engine.py
-├── drift_detector.py
-├── risk_engine.py
-├── model_trainer.py
-├── model_runtime.py
-├── redis_store.py
-├── models/
-│   └── risk_model.tflite
-└── data/
-
 # OPENCLAW ML WORKER — PRODUCT REQUIREMENTS DOCUMENT (PRD)
 
 Version: 1.0  
@@ -147,20 +131,141 @@ RULES:
 STEP 5 — MODEL TRAINING (OPTIONAL PIPELINE)
 --------------------------------------------------
 
-Purpose:
-Train lightweight predictive model on PCA features.
+--------------------------------------------------
+STEP 5 — MODEL TRAINING (REWRITTEN)
+--------------------------------------------------
 
-MODEL TYPE:
-- Logistic Regression OR single-layer neural network
+GOAL:
+Train an optimized lightweight neural network model on PCA-transformed embeddings to predict system risk states.
 
-INPUT:
-- PCA features (PC1, PC2)
+This replaces classical logistic regression with a tunable Keras-based single-layer neural network.
 
-OUTPUT:
-- TensorFlow Lite model
+The objective is to maximize predictive accuracy while maintaining extremely low inference cost for edge deployment (TensorFlow Lite).
 
-EXPORT:
-/opt/models/risk_model.tflite
+--------------------------------------------------
+MODEL TYPE
+--------------------------------------------------
+
+Primary Model:
+- Keras Sequential Model
+- Single hidden layer (minimal complexity design)
+- Softmax output for multi-class classification
+
+Example structure:
+
+INPUT → Dense(hidden_units, activation) → OUTPUT(softmax)
+
+Where:
+- Input: PCA features (PC1, PC2, PC3, PC4, PC5)
+- Output: risk class (Low / Medium / High / Critical)
+
+--------------------------------------------------
+HYPERPARAMETER SEARCH STRATEGY
+--------------------------------------------------
+
+To avoid static model selection, the system uses RANDOM SEARCH + HYPERPARAMETER TUNING.
+
+Search space includes:
+
+- hidden_units:
+  [4, 8, 16, 32]
+
+- activation:
+  ["relu", "tanh"]
+
+- learning_rate:
+  [0.001, 0.0005, 0.0001]
+
+- batch_size:
+  [8, 16, 32]
+
+- epochs:
+  [10, 25, 50]
+
+- optimizer:
+  ["adam", "rmsprop"]
+
+PROCESS:
+
+1. Randomly sample configurations
+2. Train candidate model
+3. Evaluate on validation split
+4. Select best-performing configuration based on:
+   - validation accuracy
+   - loss stability
+   - generalization score
+
+--------------------------------------------------
+TRAINING PIPELINE
+--------------------------------------------------
+
+INPUT DATA:
+- PCA feature matrix (PC1, PC2)
+- labeled risk categories
+
+STEPS:
+
+1. Normalize PCA features
+2. Split dataset:
+   - 80% training
+   - 20% validation
+
+3. Run hyperparameter search loop:
+   FOR each sampled config:
+       build model
+       train model
+       evaluate metrics
+       store score
+
+4. Select best model
+5. Retrain best model on full dataset
+
+--------------------------------------------------
+MODEL OUTPUT
+--------------------------------------------------
+
+Final trained model is exported as:
+
+- TensorFlow SavedModel (intermediate)
+- TensorFlow Lite (.tflite) for inference
+
+--------------------------------------------------
+MODEL METADATA STORAGE
+--------------------------------------------------
+
+After training, full metadata is persisted in Redis AND local artifact storage.
+
+--------------------------------------------------
+REDIS KEYS
+--------------------------------------------------
+
+model:latest
+
+Contains:
+- model version ID
+- training timestamp
+- selected hyperparameters
+- accuracy score
+- loss value
+- feature normalization config
+
+model:history
+
+Contains:
+- list of previous model versions
+- performance comparisons
+- drift alignment history
+
+model:best_config
+
+Contains:
+- best hyperparameter set from random search
+
+model:metrics
+
+Contains:
+- accuracy
+- precision
 
 --------------------------------------------------
 STEP 6 — MODEL INFERENCE
@@ -334,7 +439,3 @@ It is designed for:
 - latent space visualization
 - anomaly detection
 - future predictive intelligence
-
-==================================================
-END OF PRD
-==================================================
