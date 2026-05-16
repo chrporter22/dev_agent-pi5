@@ -33,7 +33,7 @@ services:
   # ----------------------------------
   node-api:
     build:
-      context: ./core/api
+      context: ./core/node-api
     container_name: node-api
     env_file:
       - .env
