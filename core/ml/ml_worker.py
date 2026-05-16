@@ -4,23 +4,16 @@ import os
 import time
 import numpy as np
 import json
-
 from embedding_client import fetch_embeddings
-
 from model_trainer import run_training
-
 from pca_engine import compute_pca
-
 from drift_detector import compute_drift
-
 from model_runtime import RiskModel
-
 from redis_store import (
     store_json,
     store_value,
     redis_client
 )
-
 from config import (
     ML_WORKER_SLEEP,
     ENABLE_MODEL_TRAINING
@@ -153,7 +146,6 @@ def process_embeddings():
     # ----------------------------------
     # DRIFT
     # ----------------------------------
-
     drift = compute_drift(embeddings)
 
     drift_score = float(
@@ -164,9 +156,36 @@ def process_embeddings():
         "drift:score",
         drift_score
     )
+
+    # ----------------------------------
+    # DRIFT CLASSIFICATION
+    # ----------------------------------
+
+    if drift_score < 0.25:
+
+        classification = "Stable"
+
+    elif drift_score < 0.5:
+
+        classification = "Moderate"
+
+    elif drift_score < 0.75:
+
+        classification = "High"
+
+    else:
+
+        classification = "Critical"
+
+    store_value(
+        "drift:classification",
+        classification
+    )
+    
     # ----------------------------------
     # MODEL TRAINING
     # ----------------------------------
+    
     global last_training_time
     global risk_model
 
@@ -212,20 +231,36 @@ def process_embeddings():
     # MODEL INFERENCE
     # ----------------------------------
 
+    if len(projection) == 0:
+
+        print("[ML] Empty PCA projection")
+
+        return
+
     latest_features = projection[-1]
 
-    prediction = risk_model.predict(
-        latest_features
-    )
+    if risk_model is not None:
 
-    prediction_id = prediction["prediction"]
+        prediction = risk_model.predict(
+            latest_features
+        )
 
-    risk_label = RISK_LABELS.get(
-        prediction_id,
-        "Unknown"
-    )
+        prediction_id = prediction["prediction"]
 
-    confidence = prediction["confidence"]
+        risk_label = RISK_LABELS.get(
+            prediction_id,
+            "Unknown"
+        )
+
+        confidence = prediction["confidence"]
+
+    else:
+
+        print("[ML] Risk model unavailable")
+
+        risk_label = "Unknown"
+
+        confidence = 0.0
 
     # ----------------------------------
     # STORE MODEL OUTPUTS
@@ -245,13 +280,22 @@ def process_embeddings():
         "risk:latest",
         risk_label
     )
-
+    
+    store_value(
+        "ml:heartbeat",
+        int(time.time())
+    )
+    
+    store_value(
+        "ml:last_run",
+        int(time.time())
+    )
+    
     print(
         f"[ML] "
         f"Risk={risk_label} "
         f"Confidence={confidence:.4f}"
     )
-
 
 # --------------------------------------------------
 # MAIN LOOP
