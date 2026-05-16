@@ -1,4 +1,3 @@
-````markdown
 # NODE API PRD
 
 ---
@@ -40,8 +39,6 @@ The Node API MUST:
 The ML worker remains the sole compute engine.
 
 The API layer only exposes cached Redis state.
-
----
 
 # 4. BACKEND STRUCTURE
 
