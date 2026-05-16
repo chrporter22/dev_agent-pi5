@@ -1,30 +1,5 @@
 # MASTER TODO LIST (WITH ML WORKER INTEGRATION)
 ---
-## Phase 3 — Backend API Layer
-
-### 14) Build Node.js API service
-
-**Responsibilities:**
-- Fetch from Redis (primary)  
-- Fallback to ML worker if needed  
-
----
-
-### 15) API endpoints
-
-- `/api/pca`  
-- `/api/drift`  
-- `/api/risk`  
-- `/api/model`  
-
----
-
-### 16) Add Redis caching logic
-
-- Never compute PCA on request  
-- Always serve cached results  
-
----
 
 ## Phase 4 — Control Panel (pca-backend)
 
@@ -75,11 +50,11 @@ Add:
 
 ## Phase 6 — External Integrations (LAST)
 
-### 22) Create Yahoo email
+### Create Yahoo email
 
 ---
 
-### 23) Create Telegram account
+### Create Telegram account
 
 ---
 
@@ -153,11 +128,9 @@ Telegram
 → openclaw-bot
 → openclaw-llm (Qwen2-1.5B local inference)
 → openclaw-vdb (SQLite vector DB)
-→ pca-backend 
-→ pca-ml
-→ pca-redis
-→ pca-frontend (mission control monitoring)
-→ pca-nginx (only exposed container)
+→ node-api
+→ ml
+→ pca-backend (mission control monitoring | nginx)
 
 ---
 # Full Stack Bootstrap
@@ -259,7 +232,8 @@ Expected containers:
 - `openclaw-llm`
 - `openclaw-vdb`
 - `redis`
-- `pca-backend` (if used)
+- `pca-backend` 
+- `node-api`
 
 ---
 
