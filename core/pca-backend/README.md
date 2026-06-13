@@ -368,4 +368,69 @@ node-api:3000
 
 ```
 ```
+# pca-backend Scaffold
+
+```text
+core/
+└── pca-backend/
+    ├── Dockerfile
+    ├── nginx.conf
+    ├── package.json
+    ├── tsconfig.json
+    ├── vite.config.ts
+    ├── tailwind.config.ts
+    ├── postcss.config.js
+    │
+    ├── public/
+    │
+    └── src/
+        ├── main.tsx
+        ├── App.tsx
+        │
+        ├── api/
+        │   └── mlApi.ts
+        │
+        ├── types/
+        │   └── ml.ts
+        │
+        ├── hooks/
+        │   ├── usePcaSummary.ts
+        │   └── usePcaHistory.ts
+        │
+        ├── pages/
+        │   └── Dashboard.tsx
+        │
+        ├── layouts/
+        │   └── DashboardLayout.tsx
+        │
+        ├── components/
+        │   │
+        │   ├── header/
+        │   │   └── DashboardHeader.tsx
+        │   │
+        │   ├── cards/
+        │   │   ├── DriftCard.tsx
+        │   │   ├── RiskCard.tsx
+        │   │   ├── WorkerCard.tsx
+        │   │   └── VarianceSummaryCard.tsx
+        │   │
+        │   ├── charts/
+        │   │   ├── PCAExplorer.tsx
+        │   │   ├── VarianceChart.tsx
+        │   │   ├── EigenvalueChart.tsx
+        │   │   └── HistoryTimeline.tsx
+        │   │
+        │   └── ui/
+        │       ├── Card.tsx
+        │       ├── Badge.tsx
+        │       ├── Select.tsx
+        │       └── SectionTitle.tsx
+        │
+        └── styles/
+            ├── globals.css
+            ├── viridis.css
+            └── dashboard.css
+```
+
+---
 
