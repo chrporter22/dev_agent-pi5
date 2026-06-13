@@ -1,148 +1,371 @@
-websocket streaming
-PCA animation playback
-temporal drift heatmaps
-anomaly overlays
-model version display
-feature importance explorer
+# PCA Dashboard Frontend PRD
 
+## Purpose
 
-Recommended Updated Scaffold
-src/
-├── api/
-│   └── mlApi.ts
-│
-├── components/
-│
-│   ├── cards/
-│   │   ├── DriftCard.tsx
-│   │   ├── RiskCard.tsx
-│   │   ├── HeartbeatCard.tsx
-│   │   └── VarianceCard.tsx
-│   │
-│   ├── charts/
-│   │   ├── PCAExplorer.tsx
-│   │   ├── VarianceChart.tsx
-│   │   ├── EigenvalueChart.tsx
-│   │   └── HistoryTimeline.tsx
-│   │
-│   ├── layout/
-│   │   ├── DashboardHeader.tsx
-│   │   ├── DashboardGrid.tsx
-│   │   └── DashboardShell.tsx
-│   │
-│   └── ui/
-│       ├── Card.tsx
-│       ├── Select.tsx
-│       └── Badge.tsx
-│
-├── hooks/
-│   ├── usePcaSummary.ts
-│   └── useHistory.ts
-│
-├── styles/
-│   ├── globals.css
-│   └── viridis.css
-│
-├── pages/
-│   └── Dashboard.tsx
-│
-├── types/
-│   └── ml.ts
-│
-├── App.tsx
-└── main.tsx
-PCA Explorer Component
+The PCA Dashboard is a real-time ML observability interface for OpenClaw.
 
-The major upgrade:
+The dashboard visualizes:
 
-const [xAxis, setXAxis] = useState(0)
-const [yAxis, setYAxis] = useState(1)
+* PCA latent-space projections
+* Explained variance
+* Eigenvalues
+* Drift monitoring
+* Risk prediction
+* ML worker health
+* Historical PCA evolution
 
-Controls:
+The UI is read-only and consumes data exclusively from the Node API.
 
-<select value={xAxis}>
-  PC1
-  PC2
-  PC3
-  PC4
-</select>
+---
 
-<select value={yAxis}>
-  PC1
-  PC2
-  PC3
-  PC4
-</select>
+# Architecture
 
-Projection mapping:
+```text
+ML Worker
+    ↓
 
-const data = projection.map(
-  (row, index) => ({
-    id: index,
-    x: row[xAxis],
-    y: row[yAxis]
-  })
-)
+Redis
 
-Rendering:
+    ↓
 
-<ScatterChart>
-  <Scatter
-    data={data}
-    fill="var(--viridis-7)"
-  />
-</ScatterChart>
-Viridis Theme Tokens
-:root {
+Node API
 
-  --bg: #0b0f14;
-  --panel: #111827;
-  --border: #1f2937;
+/api/ml/*
+    ↓
 
-  --viridis-1: #440154;
-  --viridis-2: #482777;
-  --viridis-3: #3e4989;
-  --viridis-4: #31688e;
-  --viridis-5: #26828e;
-  --viridis-6: #1f9e89;
-  --viridis-7: #35b779;
-  --viridis-8: #6cce59;
-  --viridis-9: #b4de2c;
-  --viridis-10: #fde725;
-}
-Snacks.nvim Style Header
- ██████╗ ██████╗ █████╗
- ██╔══██╗██╔════╝██╔══██╗
- ██████╔╝██║     ███████║
- ██╔═══╝ ██║     ██╔══██║
- ██║     ╚██████╗██║  ██║
+React Dashboard
+```
 
- PCA MONITORING DASHBOARD
+Frontend never accesses Redis directly.
 
-Header row:
+---
 
-● ML ONLINE
-● Drift: Stable
-● Risk: Low
-● Updated: 2s ago
-Dashboard Grid
-grid-template-columns:
-repeat(12, 1fr);
+# Design Goals
 
-Cards:
+Inspired by:
 
-┌─────┬─────┬─────┐
-│Drift│Risk │Alive│
-└─────┴─────┴─────┘
+* snacks.nvim dashboard
+* lazy.nvim UI
+* modern observability dashboards
+* Grafana dark mode
+* scientific visualization tools
 
-┌─────────────────┐
-│ PCA Explorer    │
-└─────────────────┘
+The dashboard should feel:
 
-┌────────┬────────┐
-│Variance│Eigen   │
-└────────┴────────┘
+* minimal
+* dense
+* terminal-inspired
+* modern
+* high signal-to-noise
 
-┌─────────────────┐
-│ History         │
-└─────────────────┘
+---
+
+# Color System
+
+Primary Palette: Viridis
+
+```text
+#440154
+#482777
+#3E4989
+#31688E
+#26828E
+#1F9E89
+#35B779
+#6CCE59
+#B4DE2C
+#FDE725
+```
+
+Dark Theme
+
+Background:
+
+```text
+#0b0f14
+```
+
+Panels:
+
+```text
+#111827
+```
+
+Borders:
+
+```text
+#1f2937
+```
+
+Text:
+
+```text
+#e5e7eb
+```
+
+Muted:
+
+```text
+#94a3b8
+```
+
+---
+
+# Layout
+
+```text
+┌────────────────────────────────────────────┐
+│ OpenClaw PCA Monitoring                     │
+│ heartbeat • drift • last run               │
+├────────────────────────────────────────────┤
+│ Drift      │ Risk      │ Variance Explained │
+├────────────────────────────────────────────┤
+│                                            │
+│ PCA Projection Explorer                    │
+│                                            │
+│ X Axis: [PC1 ▼]                            │
+│ Y Axis: [PC2 ▼]                            │
+│                                            │
+│ Scatter Plot                               │
+│                                            │
+├────────────────────────────────────────────┤
+│ Explained Variance                         │
+├────────────────────────────────────────────┤
+│ Eigenvalues                                │
+├────────────────────────────────────────────┤
+│ PCA History Timeline                       │
+└────────────────────────────────────────────┘
+```
+
+---
+
+# PCA Explorer
+
+User can select:
+
+```text
+PC1
+PC2
+PC3
+PC4
+...
+PCN
+```
+
+for both axes.
+
+Examples:
+
+```text
+PC1 vs PC2
+PC1 vs PC3
+PC2 vs PC5
+PC4 vs PC7
+```
+
+Scatter updates instantly.
+
+---
+
+# Polling
+
+Dashboard updates every:
+
+```text
+5 seconds
+```
+
+using:
+
+```ts
+React Query
+```
+
+---
+
+# Required API
+
+## Primary
+
+```http
+GET /api/ml/pca/summary
+```
+
+Used for dashboard hydration.
+
+---
+
+## Secondary
+
+```http
+GET /api/ml/pca/history
+```
+
+Used for timeline rendering.
+
+---
+
+# Dashboard Cards
+
+## Drift
+
+```text
+Current drift score
+Classification
+```
+
+Color coded:
+
+```text
+Stable
+Moderate
+Critical
+```
+
+---
+
+## Risk
+
+```text
+Prediction
+Confidence
+```
+
+---
+
+## Worker Status
+
+Displays:
+
+```text
+Heartbeat
+Last Run
+```
+
+Health determined by:
+
+heartbeat age < 30 sec
+
+````
+
+---
+
+# PCA Scatter Plot
+
+Supports:
+
+```text
+Dynamic axis selection
+Zoom
+Pan
+Tooltip
+````
+
+Tooltip shows:
+
+```text
+Point Index
+PC Value X
+PC Value Y
+```
+
+---
+
+# Variance Chart
+
+Displays:
+
+```text
+Explained Variance Ratio
+```
+
+Per component.
+
+Uses viridis gradient.
+
+---
+
+# Eigenvalue Chart
+
+Displays:
+
+```text
+Eigenvalues
+```
+
+Per component.
+
+Uses viridis gradient.
+
+---
+
+# History Timeline
+
+Displays:
+
+```text
+Projection snapshots
+```
+
+from:
+
+```http
+/api/ml/pca/history
+```
+
+Maximum:
+
+```text
+100 records
+```
+
+---
+
+# Technology Stack
+
+```text
+React
+TypeScript
+Vite
+TanStack Query
+Recharts
+Axios
+TailwindCSS
+```
+
+---
+
+# Deployment
+
+Container:
+
+```text
+pca-backend
+```
+
+Served through:
+
+```text
+nginx
+```
+
+All API traffic proxied to:
+
+```text
+node-api:3000
+```
+
+---
+
+# Future Features
+
+* websocket streaming
+* PCA animation playback
+* temporal drift heatmaps
+* anomaly overlays
+* model version display
+* feature importance explorer
+
+```
+```
+
