@@ -433,8 +433,19 @@ core/
 ```
 
 ---
-Foundation/config files
-API/types/hooks
-Layout/UI components
-Charts/dashboard pages
-Docker/nginx/README
+Optional (recommended next step)
+
+1. index.html injection setup
+meta tags for dark mode
+preload fonts (JetBrains Mono)
+OpenGraph preview for dashboards
+
+2. Loading splash screen
+“Booting PCA runtime…”
+live simulated heartbeat until /pca/summary loads
+
+3. Real-time upgrade
+replace polling with WebSocket:
+ml:heartbeat stream
+pca:update stream
+drift:update stream

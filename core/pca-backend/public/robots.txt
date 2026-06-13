@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+
+# PCA dashboard is internal ML observability UI
+# No indexing required for production deployments

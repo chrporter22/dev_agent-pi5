@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <linearGradient id="viridis" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#440154"/>
+      <stop offset="25%" stop-color="#3e4989"/>
+      <stop offset="50%" stop-color="#26828e"/>
+      <stop offset="75%" stop-color="#35b779"/>
+      <stop offset="100%" stop-color="#fde725"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="100" height="100" rx="22" fill="#0b0f14"/>
+
+  <!-- PCA axes cross -->
+  <line x1="20" y1="50" x2="80" y2="50" stroke="#1f2937" stroke-width="2"/>
+  <line x1="50" y1="20" x2="50" y2="80" stroke="#1f2937" stroke-width="2"/>
+
+  <!-- PCA "latent cluster" -->
+  <circle cx="50" cy="50" r="18" fill="url(#viridis)" opacity="0.95"/>
+  <circle cx="35" cy="60" r="4" fill="#35b779"/>
+  <circle cx="65" cy="40" r="4" fill="#fde725"/>
+  <circle cx="60" cy="65" r="3" fill="#26828e"/>
+</svg>
