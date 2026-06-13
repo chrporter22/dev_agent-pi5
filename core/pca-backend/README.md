@@ -433,4 +433,8 @@ core/
 ```
 
 ---
-
+Foundation/config files
+API/types/hooks
+Layout/UI components
+Charts/dashboard pages
+Docker/nginx/README

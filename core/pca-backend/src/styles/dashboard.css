@@ -1,0 +1,95 @@
+ /* ------------------------------
+   DASHBOARD LAYOUT SYSTEM
+   Snacks.nvim / Grafana style grid
+------------------------------ */
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 1rem;
+}
+
+/* ------------------------------
+   PANEL SYSTEM
+------------------------------ */
+
+.panel {
+  background: #111827;
+  border: 1px solid #1f2937;
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: 0 0 0 1px rgba(31, 41, 55, 0.3);
+}
+
+/* ------------------------------
+   HEADER BAR
+------------------------------ */
+
+.dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #1f2937;
+  margin-bottom: 20px;
+}
+
+/* ------------------------------
+   KPI CARDS ROW
+------------------------------ */
+
+.kpi-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+/* ------------------------------
+   CHART PANEL HEIGHTS
+------------------------------ */
+
+.chart-lg {
+  height: 520px;
+}
+
+.chart-md {
+  height: 320px;
+}
+
+/* ------------------------------
+   TYPOGRAPHY
+------------------------------ */
+
+.title {
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.value {
+  font-size: 28px;
+  font-weight: 700;
+  color: #e5e7eb;
+}
+
+/* ------------------------------
+   ANIMATIONS
+------------------------------ */
+
+@keyframes pulse-viridis {
+  0% {
+    box-shadow: 0 0 0 0 rgba(53, 183, 89, 0.4);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(53, 183, 89, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(53, 183, 89, 0);
+  }
+}
+
+.pulse {
+  animation: pulse-viridis 2s infinite;
+}

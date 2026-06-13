@@ -1,0 +1,57 @@
+:root {
+
+  /* ------------------------------
+     BACKGROUND TOKENS
+  ------------------------------ */
+
+  --bg: #0b0f14;
+  --panel: #111827;
+  --border: #1f2937;
+
+  --text: #e5e7eb;
+  --muted: #94a3b8;
+
+  /* ------------------------------
+     VIRIDIS PALETTE (CORE)
+  ------------------------------ */
+
+  --v0: #440154;
+  --v1: #482777;
+  --v2: #3e4989;
+  --v3: #31688e;
+  --v4: #26828e;
+  --v5: #1f9e89;
+  --v6: #35b779;
+  --v7: #6cce59;
+  --v8: #b4de2c;
+  --v9: #fde725;
+
+  /* ------------------------------
+     SEMANTIC COLORS
+  ------------------------------ */
+
+  --success: #35b779;
+  --warning: #fde725;
+  --danger: #ef4444;
+  --info: #3e4989;
+}
+
+/* Utility helpers (non-tailwind overrides) */
+
+.text-viridis {
+  color: var(--v6);
+}
+
+.bg-viridis {
+  background: linear-gradient(
+    90deg,
+    var(--v0),
+    var(--v3),
+    var(--v6),
+    var(--v9)
+  );
+}
+
+.border-viridis {
+  border-color: var(--v5);
+}
