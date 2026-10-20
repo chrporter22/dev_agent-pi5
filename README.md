@@ -110,7 +110,7 @@ DEV Pi is a secure, reproducible AI control plane and analytics stack designed t
 It provides:
 
 - Secure Telegram-controlled automation bot
-- Local Qwen2-1.5B LLM inference (llama.cpp)
+- External LiteLLM gateway (`core/llm` is a thin stateless proxy; gateway lives in a separate user-owned repo)
 - SQLite-backed vector database
 - PCA monitoring analytics pipeline and mission control
 - Redis caching layer
@@ -126,7 +126,7 @@ All components follow strict zero-trust and least-privilege security rules.
 
 Telegram
 → openclaw-bot
-→ openclaw-llm (Qwen2-1.5B local inference)
+→ openclaw-llm (LiteLLM gateway proxy)
 → openclaw-vdb (SQLite vector DB)
 → node-api
 → ml

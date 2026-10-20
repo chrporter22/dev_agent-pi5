@@ -1,86 +1,93 @@
-# LLM CONTAINER (openclaw-llm)
+# LLM Proxy Container (openclaw-llm)
 
-Local-Only Structured Inference Engine  
-Target: Raspberry Pi 5 (16GB RAM, ARM64, Arch Linux)  
-Engine: llama.cpp (ARM64 optimized)  
-Model: Qwen2-1.5B-Instruct (GGUF Q4_K_M)  
-Security Model: Zero Trust  
+Thin stateless proxy to an external LiteLLM gateway.  
+Target deployment: containerized stack on a Raspberry Pi 5 (ARM64).  
+Security model: zero trust, single egress point to the gateway.
 
 ---
 
-# Purpose
+## Purpose
 
-The openclaw-llm container is a **pure inference microservice** used exclusively by openclaw-bot.
+`openclaw-llm` is a Flask service that forwards `POST /parse` requests from
+`openclaw-bot` to a LiteLLM-compatible gateway running elsewhere and returns
+strict JSON. It is the **only** service in this stack with outbound internet
+access.
 
-It:
+It does not run a model. It does not download weights. It does not persist
+anything to disk.
 
-- Loads a local GGUF LLM model
-- Accepts structured POST requests
-- Returns strict JSON responses
-- Has zero outbound internet access
-- Is not autonomous
-- Is not an orchestration agent
-- Cannot access GitHub, Telegram, Redis, or host system
+Architectural flow:
 
-Architectural Flow:
+```
+Telegram
+  → openclaw-bot
+  → openclaw-llm (this container, over internal_net)
+  → external LiteLLM gateway (over outbound_net)
+  → openclaw-llm
+  → openclaw-bot
+  → GitHub Repo B
+```
 
-Telegram  
-→ openclaw-bot  
-→ openclaw-llm  
-→ openclaw-bot  
-→ GitHub Repo B  
-
-The LLM is subordinate to the bot and never makes execution decisions.
-
----
-
-# Model Specification
-
-Model: Qwen2-1.5B-Instruct  
-Format: GGUF (Q4_K_M)  
-Approx Size: ~4GB  
-Context Window: 2048 tokens  
-
-Rationale:
-- Fits within Pi 5 memory limits
-- Balanced reasoning quality and speed
-- <5 second structured parsing latency target
-
-Recommended Runtime Settings:
-- Threads: 6–8
-- Memory allocation: 6–8GB
-- --ctx-size 2048
-- --mlock enabled
-- ARM NEON optimization enabled
-
-Model Path (inside container):
-
-/models/qwen2-1_5b-instruct-q4_k_m.gguf
+The LLM (whichever model the gateway serves) is subordinate to the bot and
+never makes execution decisions.
 
 ---
 
-# API Specification
+## Upstream Gateway
 
-Base URL (internal only):
+The LiteLLM gateway is a separate user-owned repo (`~/ai-gateway`). It is
+configured to expose an OpenAI-compatible `/v1/chat/completions` endpoint
+and authenticate with a bearer token.
 
+This repo does **not** include or manage the gateway. It only consumes it.
+
+Required environment variables (set in `.env`, validated by `core/llm/config.py`):
+
+| Variable               | Purpose                                       |
+|------------------------|-----------------------------------------------|
+| `AI_GATEWAY_BASE_URL`  | Base URL of the gateway (e.g. `https://...`)  |
+| `AI_GATEWAY_API_KEY`   | Bearer token sent in `Authorization` header   |
+| `AI_GATEWAY_MODEL`     | Model name to request on the gateway          |
+
+Optional, with defaults:
+
+| Variable                  | Default                  |
+|---------------------------|--------------------------|
+| `LLM_PORT`                | `8080`                   |
+| `LLM_TIMEOUT_SECONDS`     | `30`                     |
+| `LLM_MAX_RETRIES`         | `2`                      |
+| `LLM_GATEWAY_CHAT_PATH`   | `/v1/chat/completions`   |
+
+The service refuses to start if any required variable is missing or malformed.
+
+---
+
+## API Specification
+
+Base URL (internal only, exposed on `internal_net`):
+
+```
 http://openclaw-llm:8080
+```
 
 The container does NOT expose ports to the host.
 
----
+### `POST /parse`
 
-## POST /parse
-
-Structured instruction parsing endpoint.
+Structured instruction parsing endpoint. Contract preserved verbatim for
+`openclaw-bot`.
 
 Request:
 
+```json
 {
   "instruction": "Create a CLI tool that reads CSV and runs PCA"
 }
+```
 
-Response:
+Response (200):
 
+```json
 {
   "type": "cli_tool",
   "language": "python",
@@ -88,127 +95,106 @@ Response:
   "tests": true,
   "description": "CLI tool for PCA on CSV datasets"
 }
+```
 
-Requirements:
+Error responses:
 
-- Must return valid JSON only
-- No markdown
-- No explanations
-- No prose outside JSON
-- Schema must be deterministic
-- Latency target: <5 seconds
+| Status | When                                                       |
+|--------|------------------------------------------------------------|
+| `400`  | Missing/empty `instruction`                                |
+| `502`  | Upstream gateway HTTP error or unparseable response         |
+| `504`  | Upstream gateway timeout                                   |
 
----
+The proxy requests the upstream with:
 
-## POST /completion (Future Optional)
+- `response_format: {"type": "json_object"}` (strict JSON mode)
+- `temperature: 0.2`
+- A fixed `system` prompt instructing the model to return only the schema above
 
-Request:
+Hand-written validation rejects:
 
-{
-  "prompt": "...",
-  "n_predict": 256,
-  "temperature": 0.7
-}
+- Empty `choices[0].message.content`
+- Non-object JSON
+- Anything other than what the existing `core/bot/llm_client.py` already
+  validates downstream (language/feature shape, etc.)
 
-Response:
+### `GET /health`
 
-{
-  "completion": "..."
-}
-
-This endpoint is optional and not required for MVP.
+Returns `{"status": "ok"}`. Cheap, no upstream call.
 
 ---
 
-# Security Model
+## Security Model
 
-Zero Trust enforcement.
+Zero trust enforcement.
 
-The LLM container:
+The proxy container:
 
-- Runs as non-root user
+- Runs as non-root user `llmuser`
 - Has read-only root filesystem
 - Drops all Linux capabilities
-- Uses no-new-privileges
-- Has pids_limit enforced
-- Has memory limits enforced (8GB)
+- Uses `no-new-privileges`
+- Has `pids_limit` enforced (100)
+- Has memory limit enforced (512 MB)
 - Has no docker.sock
 - Has no privileged flags
 - Has no host mounts
-- Has no outbound internet
 - Exposes no public ports
+- Stores no secrets at rest (gateway key is only in env, never logged)
+
+Network posture:
+
+- Attached to `internal_net` (talks to `openclaw-bot`, `openclaw-worker`)
+- Attached to `outbound_net` (talks to the external LiteLLM gateway)
+- DNS is allowed (required to resolve the gateway hostname)
+- Cannot reach Redis, Telegram, GitHub, or any other internal service
+
+Egress is **single-purpose**: only the configured `AI_GATEWAY_BASE_URL` is
+expected to be contacted. Add egress filtering at the host level (e.g. iptables
+on the docker host) for defense in depth if the deployment environment supports
+it.
 
 ---
 
-# Network Isolation
+## What Was Removed (vs. the Prior Local-Model Era)
 
-The container must:
+This service no longer:
 
-- Attach only to internal_net
-- Not attach to outbound_net
-- Not attach to frontend_net
-- Not expose ports to host
+- Builds or runs `llama.cpp`
+- Loads a GGUF model from disk
+- Mounts the `openclaw_llm_model` Docker volume
+- Holds an 8 GB memory footprint
+- Uses `dns: []` (the gateway hostname must resolve)
 
-Only openclaw-bot may call the LLM.
-
-The LLM must not:
-
-- Access Redis
-- Access GitHub
-- Access Telegram
-- Access external DNS
-- Reach the internet
-
-Isolation is achieved through Docker network segmentation.
+The `core/llm/llm-server/` directory and its `start-llm.sh` have been removed
+from this repo. Image size drops from multi-GB to ~150 MB.
 
 ---
 
-# Persistence
+## Resource Limits
 
-Docker Named Volume:
+| Resource | Value   |
+|----------|---------|
+| Memory   | 512 MB  |
+| PIDs     | 100     |
+| Swap     | none    |
+| CPU      | unset (default) |
 
-openclaw_llm_model
-
-Mounted:
-
-/models
-
-Rules:
-
-- Volume is read-only inside container
-- No host bind mounts
-- Model persists across rebuilds
-- No runtime downloads allowed
-
-Example model file:
-
-/models/qwen2-1_5b-instruct-q4_k_m.gguf
+Peak usage across all containers should stay well under the host total.
 
 ---
 
-# Resource Limits (Pi 5 – 16GB)
+## Deployment
 
-Memory Limit: 8GB  
-Threads: 6–8  
-Context Window: 2048  
-PIDs: 200  
-Swap: Disabled  
+Built and run via Docker Compose. Required env vars in `.env`:
 
-System Target:
-
-Total system peak usage across all containers <13GB.
-
----
-
-# Deployment
-
-Build and run via Docker Compose:
-
-```bash
-docker compose up -d
+```
+AI_GATEWAY_BASE_URL=https://your-litellm-host.example.com
+AI_GATEWAY_API_KEY=your_litellm_api_key_here
+AI_GATEWAY_MODEL=gpt-4o-mini
 ```
 
-Verification:
+Verification (from the host):
 
 ```bash
 docker inspect openclaw-llm
@@ -216,119 +202,70 @@ docker inspect openclaw-llm
 
 Confirm:
 
-- Not privileged
-- ReadOnlyRootFilesystem: true
-- CapDrop: ALL
-- No exposed ports
-- Attached only to internal_net
-- Memory limit enforced
-- Running as non-root
+- `ReadOnlyRootFilesystem: true`
+- `CapDrop: ALL`
+- `SecurityOpt`: `no-new-privileges:true`
+- `Memory` ≤ 536 MB
+- No `dns: []`
+- No host bind mounts
+- No exposed host ports
+- `Networks`: `internal_net` + `outbound_net`
+
+Functional smoke test:
+
+```bash
+docker compose exec openclaw-bot \
+  python -c "import requests; print(requests.post('http://openclaw-llm:8080/parse', json={'instruction': 'ping'}).json())"
+```
+
+Or directly from the host network if reachable:
+
+```bash
+curl -s http://openclaw-llm:8080/health
+```
 
 ---
 
-# Acceptance Criteria
+## Acceptance Criteria
 
 Deployment:
 
 - Container launches successfully
-- Model loads from Docker volume
+- Refuses to start without `AI_GATEWAY_*` env vars
 - Runs as non-root
 - Root filesystem read-only
-- No outbound network
+- Egress only to `AI_GATEWAY_BASE_URL`
 - No public ports
 
 Functional:
 
-- /parse returns valid JSON
-- Bot can successfully call LLM
-- Latency <5 seconds
-- Memory usage within limit
+- `/health` returns `200 {"status": "ok"}`
+- `/parse` returns valid JSON for a real instruction when the gateway is reachable
+- `/parse` returns `502`/`504` cleanly when the gateway is not
 
 Security:
 
 - No shell execution exposed
 - No arbitrary code execution
-- No access to host filesystem
-- No access to GitHub API
-- No access to Telegram API
-- No secret environment variables
+- No host filesystem access
+- No GitHub / Telegram / Redis access
+- No secret values in logs
 
 ---
 
-# Zero Trust Guarantees
+## Architectural Role
 
-The LLM cannot:
+Control plane:
 
-- Access Repo A
-- Access Repo B
-- Access GitHub
-- Access Telegram
-- Access Redis
-- Access host filesystem
-- Execute arbitrary shell commands
-- Mount additional volumes
-- Make outbound internet calls
+```
+Telegram
+  → openclaw-bot
+  → openclaw-llm (this proxy)
+  → external LiteLLM gateway
+  → openclaw-llm
+  → openclaw-bot
+  → GitHub Repo B
+```
 
-The LLM only:
-
-- Accepts structured POST requests
-- Loads model from /models
-- Performs inference
-- Returns structured JSON
-
----
-
-# Design Philosophy
-
-- Stateless (except model in memory)
-- Deterministic JSON generator
-- No autonomy
-- No orchestration logic
-- Not an agent
-- Local-only inference engine
-
-It is a controlled parsing engine used by openclaw-bot.
-
----
-
-# Architectural Role
-
-Control Plane:
-
-Telegram  
-→ openclaw-bot  
-→ openclaw-llm  
-→ GitHub Repo B  
-
-The LLM is never the decision-maker.  
-It is a constrained subordinate service.
-
----
-
-# Future Extensions
-
-- Grammar-constrained JSON output
-- Schema validation enforcement
-- Context-aware parsing using vector DB
-- Embedding endpoint
-- Audit logging
-- Token usage limits
-- Output policy enforcement
-- Structured prompt templates
-
----
-
-# Security Note
-
-No outbound firewall rules are required for Telegram or GitHub.
-
-The LLM container has:
-- No network route to external services
-- No public port exposure
-- No secret tokens
-- No credentials
-
-Security is achieved through strict container isolation and network segmentation.
-
----
-
+The proxy is never the decision-maker. It is a constrained subordinate
+service used by `openclaw-bot`.

@@ -135,7 +135,7 @@ DEV AGENT Pi — a zero-trust, fully containerized AI + analytics stack for a Ra
 ## Services
 
 - `core/bot` — `openclaw-bot` + `openclaw-worker`. Telegram polling, LLM command parsing, Redis job queue, creates `feature/<uuid>` branches and opens PRs. Never touches the host, the shell, or `main`.
-- `core/llm` — `openclaw-llm`. llama.cpp built from source on `ubuntu:22.04` plus a Flask gateway. Stateless inference only; `POST /parse` returns strict JSON with no prose or markdown. Outbound DNS is disabled (`dns: []`).
+- `core/llm` — `openclaw-llm`. Thin stateless Flask proxy that forwards `POST /parse` to an external LiteLLM gateway (separate repo, user-owned) over `outbound_net`. Bearer auth, OpenAI-compatible `response_format: {"type": "json_object"}`, hand-written response validation. This service is the only one in the stack with egress to the gateway; `core/bot` keeps `internal_net`-only. The `POST /parse` contract returned to `core/bot` is unchanged.
 - `core/ml` — `openclaw-ml`. Background analytics loop with no HTTP API and no exposed ports. Embedding ingest → PCA (pure numpy, top 5 components) → drift detection → risk classification → Keras single-hidden-layer model with random hyperparameter search → TFLite export. Writes every output to Redis (`pca:*`, `drift:*`, `risk:latest`, `model:*`, `ml:heartbeat`, `ml:last_run`).
 - `core/vdb` — `openclaw-vdb`. FastAPI + FAISS + sentence-transformers semantic memory. Internal API on 8081: `POST /embed`, `POST /upsert`, `POST /search`, `GET /health`.
 - `core/node-api` — Express/TypeScript read-only ML layer on 3000, endpoints under `/api/ml/`.
@@ -173,9 +173,7 @@ These are already broken on `main`. Do not re-diagnose them mid-task and do not 
 - `core/pca-backend/src/main.ts` contains JSX and must be `main.tsx`. It imports `./styles/globals.css` while the file on disk is `global.css`. `src/App.tsx` has a line-broken `import Dashboard\nfrom "./pages/Dashboard"` with no semicolon. There is no `core/pca-backend/index.html` even though `vite.config.ts` and `tailwind.config.ts` expect one.
 - `core/node-api/src/routes/ml.ts` imports `../utils/redisHelpers`; the file on disk is `redisHelper.ts`.
 - `core/vdb/Dockerfile` has `COPY ./bootstrap /app/bootstrap`; no `bootstrap/` directory exists.
-- `core/llm/llm-server/start-llm.sh` starts llama.cpp on 8081 while the Dockerfile `EXPOSE 8080` and `LLAMA_ENDPOINT` point at `http://openclaw-llm:8080`.
-- `install.sh` still contains the placeholders `MODEL_URL="https://YOUR_MODEL_DOWNLOAD_URL"` and `MODEL_SHA256="REPLACE_WITH_EXPECTED_SHA256_HASH"`, so it cannot complete as written.
-- `bootstrap_vdb.sh` calls `python3 ./core/vdb/populate_volume.py`; the file is at `core/vdb/scripts/populate_volume.py`.
+- `install.sh` still calls `./bootstrap_vdb.sh`, which calls `python3 ./core/vdb/populate_volume.py`; the file is at `core/vdb/scripts/populate_volume.py`.
 - The root `README.md` is a TODO/PRD/security-spec hybrid rather than a project README, and its `docker compose up -d` instructions do not start the three newer services.
 
 ## Memory notes for this project

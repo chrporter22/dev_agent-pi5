@@ -1,62 +1,40 @@
-FROM ubuntu:22.04
+# core/llm/Dockerfile
+# ---------------------------
+# THIN FLASK PROXY → EXTERNAL LITELLM GATEWAY
+# ---------------------------
+FROM python:3.12-slim
 
 # ---------------------------
 # CREATE NON-ROOT USER
 # ---------------------------
-RUN useradd -ms /bin/bash llmuser
-
-USER root
-
-# ---------------------------
-# SYSTEM DEPENDENCIES
-# ---------------------------
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    cmake \
-    git \
-    wget \
-    curl \
-    python3 \
-    python3-pip \
-    && rm -rf /var/lib/apt/lists/*
+RUN groupadd --system llmgroup \
+    && useradd --system --gid llmgroup --home /app --shell /sbin/nologin llmuser
 
 # ---------------------------
-# BUILD llama.cpp (REPRODUCIBLE)
+# APP DIRECTORY
 # ---------------------------
-WORKDIR /home/llmuser
-
-RUN git clone --depth 1 https://github.com/ggerganov/llama.cpp.git \
-    && cd llama.cpp \
-    && make -j$(nproc) LLAMA_NATIVE=1
+WORKDIR /app
 
 # ---------------------------
-# VERIFY BUILD OUTPUT SAFELY
+# PYTHON DEPENDENCIES (CACHED LAYER)
 # ---------------------------
-RUN find /home/llmuser/llama.cpp -name server || true
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
 # ---------------------------
-# MODEL DIRECTORY
+# APP CODE
 # ---------------------------
-RUN mkdir -p /models
+COPY app.py .
+COPY config.py .
+
+RUN chown -R llmuser:llmgroup /app
 
 # ---------------------------
-# OWNERSHIP FIX
-# ---------------------------
-RUN chown -R llmuser:llmuser /home/llmuser \
-    && chown -R llmuser:llmuser /models
-
-# ---------------------------
-# SWITCH TO NON-ROOT
+# RUNTIME
 # ---------------------------
 USER llmuser
-
-# ---------------------------
-# WRAPPER APP
-# ---------------------------
-WORKDIR /home/llmuser
-COPY --chown=llmuser:llmuser ./llm-server ./llm-server
-
-WORKDIR /home/llmuser/llm-server
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
 
 # ---------------------------
 # INTERNAL SERVICE PORT ONLY
@@ -66,4 +44,4 @@ EXPOSE 8080
 # ---------------------------
 # ENTRYPOINT
 # ---------------------------
-ENTRYPOINT ["./start-llm.sh"]
+CMD ["gunicorn", "-w", "2", "-b", "0.0.0.0:8080", "--access-logfile", "-", "--error-logfile", "-", "app:app"]

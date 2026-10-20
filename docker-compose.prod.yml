@@ -105,8 +105,6 @@ services:
       - REDIS_PORT=6379
       - VDB_HOST=openclaw-vdb
       - VDB_PORT=8081
-      - LLM_HOST=openclaw-llm
-      - LLM_PORT=8080
     networks:
       - internal_net
     depends_on:
@@ -125,31 +123,37 @@ services:
     restart: unless-stopped
 
   # ----------------------------------
-  # LLM SERVICE (NO INTERNET)
+  # LLM PROXY (THIN, EGRESS ONLY TO AI GATEWAY)
   # ----------------------------------
+  # This service no longer runs a local model. It is a stateless Flask proxy
+  # that forwards `POST /parse` requests to the external LiteLLM gateway and
+  # returns strict JSON to `openclaw-bot`. It is the only service with
+  # outbound internet access in the stack.
   openclaw-llm:
     build:
       context: ./core/llm
     image: openclaw/llm:${LLM_VERSION}
     container_name: openclaw-llm
+    env_file:
+      - .env
+    environment:
+      - AI_GATEWAY_BASE_URL
+      - AI_GATEWAY_API_KEY
+      - AI_GATEWAY_MODEL
     expose:
       - "8080"
     networks:
       - internal_net
+      - outbound_net
     read_only: true
     tmpfs:
       - /tmp
-    volumes:
-      - openclaw_llm_model:/models:ro
     cap_drop:
       - ALL
     security_opt:
       - no-new-privileges:true
-    user: "1000:1000"
-    mem_limit: 8g
-    memswap_limit: 8g
-    pids_limit: 200
-    dns: []
+    mem_limit: 512m
+    pids_limit: 100
     restart: unless-stopped
 
   # ----------------------------------
