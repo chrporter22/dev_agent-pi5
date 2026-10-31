@@ -1,0 +1,68 @@
+name: Build PR
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  docker-build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - name: bot
+            context: ./core/bot
+          - name: ml
+            context: ./core/ml
+          - name: node-api
+            context: ./core/node-api
+          - name: pca-backend
+            context: ./core/pca-backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build ${{ matrix.service.name }} image
+        uses: ./.github/actions/docker-build
+        with:
+          service: ${{ matrix.service.name }}
+          context: ${{ matrix.service.context }}
+          push: false
+          tags: ${{ matrix.service.name }}:pr-${{ github.event.pull_request.number }}
+
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run Python tests
+        run: |
+          cd core/bot
+          python -m py_compile *.py
+          cd ../ml
+          python -m py_compile *.py
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run node-api tests
+        run: |
+          cd core/node-api
+          npm install
+          npm run build
+
+      - name: Run pca-backend tests
+        run: |
+          cd core/pca-backend
+          npm install
+          npm run build

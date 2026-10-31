@@ -359,7 +359,7 @@ Implementation status (full plan: `.ai/sessions/llm/2026-10-28-2053--LEAVE-OFF.m
 - ✅ **Phase 2** — Git / PR workflow. `github_client.py`, `/build` + `/chat` + `/pr` commands, `queue_worker.py` rewrite.
 - ✅ **Phase 3** — Container wiring + Redis ACLs. `git` in bot image, `/sandbox` tmpfs, per-service Redis ACLs.
 - ✅ **Phase 4** — ML cleanup + dashboard fixes. Keras + TFLite removed; `risk_classifier.py` (rules-based); pca-backend build fixes (main.tsx, index.html, css rename, nginx).
-- ⏳ **Phase 5** — CI/CD. `.github/workflows/{ci,deploy,build-pr}.yml` + `.github/actions/docker-build/action.yml`; write the `lightweight-vertical-to-ai-gateway` decision file.
+- ✅ **Phase 5** — CI/CD. `.github/workflows/{ci,deploy,build-pr}.yml` + `.github/actions/docker-build/action.yml`; write the `lightweight-vertical-to-ai-gateway` decision file. All shipped.
 
 ---
 

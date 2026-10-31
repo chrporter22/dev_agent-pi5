@@ -4,7 +4,7 @@ Version: 2.0
 Service: dev_agent-pi5
 Runtime: Docker Compose (6 services) on Raspberry Pi 5 (ARM64, 16GB, Arch Linux)
 Scope: Telegram frontend to a user-owned AI gateway, with git/PR automation
-Status: Phases 1–4 complete (chat + build + containers + Redis ACLs + ML cleanup + dashboard fixes); Phase 5 (CI/CD) pending.
+Status: Phases 1–5 complete (chat + build + containers + Redis ACLs + ML cleanup + dashboard fixes + CI/CD).
 
 ---
 
@@ -425,7 +425,7 @@ docker exec -it redis redis-cli --user ml --pass "$REDIS_PASSWORD_ML" ACL LIST
 - **SQL** — Redis only. Add a database only if a future workflow genuinely needs it (with RLS enabled in the first migration).
 - **Multi-tenant SaaS** — single user only.
 - **A long-running "learning" ML model** — Phase 4 removed the Keras classifier. Risk classification is rules-based. Adding it back requires a deliberate decision.
-- **CI/CD in this repo** — Phase 5. The bot creates `.github/workflows/*.yml` *inside target repos* via the gateway's response, but the workflows that build/deploy this repo itself are not yet shipped.
+- **CI/CD in this repo** — Phase 5 shipped. The bot creates `.github/workflows/*.yml` *inside target repos* via the gateway's response. This repo ships `.github/workflows/{ci,deploy,build-pr}.yml` + `.github/actions/docker-build/action.yml`.
 
 ---
 
@@ -437,7 +437,7 @@ Implementation status (full plan: `.ai/sessions/llm/2026-10-28-2053--LEAVE-OFF.m
 - ✅ **Phase 2** — Git/PR workflow. `github_client.py`, `/build` + `/chat` + `/pr` commands, `queue_worker.py` rewrite, branch naming `dev-agent/<job-id-prefix>`.
 - ✅ **Phase 3** — Container wiring + Redis ACLs. `git` in bot image, `/sandbox` tmpfs on worker, `healthcheck.py` for worker, per-service Redis ACLs (`default off`, `nodeapi` read-only by command set), `docker-compose.prod.yml` rewrite, `.env.example` reorganized.
 - ✅ **Phase 4** — ML cleanup + dashboard fixes. Keras + TFLite + `embedding_client.py` removed; `risk_classifier.py` (rules-based, deterministic band-edge confidence); `core/ml/requirements.txt` trimmed to `numpy` + `redis` + `requests`; pca-backend build fixes (`main.tsx`, `index.html`, `global.css` import, `App.tsx` import, nginx `proxy_pass`); optional `risk`/`confidence` on `PcaSummary` so dashboard renders even with empty Redis.
-- ⏳ **Phase 5** — CI/CD. `.github/workflows/{ci,deploy,build-pr}.yml` + `.github/actions/docker-build/action.yml`. Write the `lightweight-vertical-to-ai-gateway` decision file (the *why*). Final README roadmap flip + AST/grep verification.
+- ✅ **Phase 5** — CI/CD. `.github/workflows/{ci,deploy,build-pr}.yml` + `.github/actions/docker-build/action.yml`. Write the `lightweight-vertical-to-ai-gateway` decision file (the *why*). All shipped.
 
 ---
 
