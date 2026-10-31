@@ -1,8 +1,8 @@
 import Card from "../ui/Card"
 
 interface Props {
-  risk: string
-  confidence: number
+  risk?: string
+  confidence?: number
 }
 
 export default function RiskCard({
@@ -18,7 +18,7 @@ export default function RiskCard({
         font-bold
         "
       >
-        {risk}
+        {risk ?? "Unknown"}
       </div>
 
       <div
@@ -27,7 +27,9 @@ export default function RiskCard({
         mt-2
         "
       >
-        {(confidence * 100).toFixed(1)}%
+        {confidence !== undefined
+          ? `${(confidence * 100).toFixed(1)}%`
+          : "—"}
       </div>
 
     </Card>

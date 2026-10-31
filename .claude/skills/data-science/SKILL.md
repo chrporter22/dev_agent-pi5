@@ -1,91 +1,79 @@
 ---
 name: data-science
-description: Full-stack data science workflow for Python and TensorFlow — data intake, EDA, preprocessing, feature engineering, modeling, evaluation, serving, and monitoring — plus PCA, drift detection, and low-latency serving to a TypeScript/Node stack. Use when working on ML, PCA, model training, drift, or risk work in this repo. Triggers: "train a model", "PCA", "drift", "features", "model serving", "data pipeline", "tflite", "keras".
+description: The actual data-science workflow for this repo — numpy-only PCA, statistical drift, rules-based risk, served via Redis to a TypeScript/Node stack. Use when working in `core/ml/`, when touching PCA/drift/risk math, or when wiring a new data source into the dormant ML loop. Triggers: "PCA", "drift score", "rules-based risk", "numpy only", "no Keras", "no TensorFlow", "TFLite drop", "embedding source".
 ---
 
-# Data Science Skill — Full-Stack Python + TensorFlow
+# Data Science Skill — numpy-only PCA + Drift + Rules-Based Risk
 
-Act as a senior data scientist in this repo. The workflows below cover the whole lifecycle — intake, modeling, serving — and push predictions to the TypeScript/Node stack as low-latency, non-redundant microservices. They sit on top of the mandatory rules in `AGENTS.md` (plan first, single agent, memory discipline) and the engineering standards there.
+This skill is repo-specific. It supersedes the generic `data-science` skill that once described a TensorFlow/Keras + FastAPI + `contract/` workflow — none of which apply to this repo after the 2026-10-24 simplify and the 2026-10-31 Keras/TFLite drop. The math here is **numpy-only**; the serving path is **Redis → Node API → React dashboard**; the model is **rules-based, not learned**.
 
 ## Operating principles
 
-- **Start simple, prove, then add complexity.** A baseline beats a beautiful model that ships late. Only escalate to deep models when the baseline cannot hit the target.
-- **Know the latency budget.** Measure tail latency of the serving path before optimizing. Optimize what the measurements blame, not what "looks slow".
-- **No redundant work.** Never recompute what is cached, re-fit what has a versioned artifact, or re-derive what the API contract already defines. Reuse beats duplicate.
-- **Reproducible by default.** Seeds, data version, feature version, model version, canned eval set — every experiment reproducible.
-- **Question the data first.** A senior data scientist distrusts the data until it is understood: provenance, missingness, distributions, and how it was generated.
+- **Start simple, prove, then add complexity.** The drift threshold ladder (0.25 / 0.5 / 0.75) plus the rules-based risk classifier is the baseline. It beats a learned model that ships late and is already what the dashboard renders.
+- **Know the latency budget.** The serving path is Redis: `node-api` reads, `pca-backend` polls. Measure end-to-end render time before tuning `PCA_COMPONENTS` or the loop interval.
+- **No redundant work.** The Node API is read-only over Redis — it never recomputes PCA, drift, or risk. `pca-backend` never touches Redis at all. The single source of truth is the `ml` user's key space (`pca:*`, `drift:*`, `risk:*`, `model:*`, `ml:*`).
+- **Reproducible by default.** Every PCA fit writes `mean`, `components`, `explained_variance_ratio`, `eigenvalues`, `n_samples`, `n_features`. Drift and risk thresholds are constants in `core/ml/config.py` and go through the session file when they change.
+- **Question the data first.** When a real data source is wired, the first batch is the provenance check. Provenance, missingness, distributions, how the embeddings were generated — these are the questions that decide whether the rest of the pipeline is meaningful.
 
 ## Workflow
 
-1. **Read memory first.** Check `.ai/decisions/` and `.ai/sessions/` for `data`, `ml`, `pca`, `model` topics before planning. Never re-litigate settled decisions.
-2. **Plan.** State the problem, the target metric, the latency budget, and the simple-baseline choice in the plan before coding.
-3. **Intake.** One ingestion module (or service) pulls raw data once; record the data version.
-4. **EDA.** Distributions, missingness, correlations, class balance. Write findings to the session file.
-5. **Preprocessing.** One pipeline, reusable and versioned. Fit transforms on training folds only — no leakage.
-6. **Feature engineering.** Feature definitions live in one place (feature module/store). The full-stack rule still applies: share what genuinely repeats, duplicate what does not.
-7. **Modeling.** Baseline first; TensorFlow/Keras when needed. Keep models small for the latency target (quantize, prune, drop layers before scaling work).
-8. **Evaluation.** Realistic eval protocol: proper train/val/test split, leakage-free transforms, metric matched to the business goal (not accuracy for imbalanced data).
-9. **Serve.** Deploy as a stateless microservice that loads artifacts once at startup; contract-first API consumed by the Node backend.
-10. **Monitor.** Log prediction latency (repo structured logging: `{ requestId, userId, action }`), track feature drift, and have a rollback path.
+1. **Read memory first.** Check `.ai/decisions/` (topic `llm`, `simplify`, `security`) and `.ai/sessions/` (topic `llm`, `ml`) before planning. The 2026-10-24 simplify decision and the 2026-10-31 ML cleanup session file are the canonical context.
+2. **Plan.** State the data source, the math, the dashboard contract, and the threshold choice in the plan before coding. No Kafka-style config-driven workflow engines — direct numpy code in `core/ml/`.
+3. **Intake.** One place fetches embeddings. Today that place returns `None` (the vdb source was removed). When it is wired, the intake is the only file that knows the source URL and authentication.
+4. **EDA / sanity check.** Shape, near-zero variance, duplicate columns. Handled inline in `pca_engine.py` (`std[std == 0] = 1.0`, `n_samples >= 2`, 2D). Record findings in the session file.
+5. **PCA.** Top-`k` components (`k = 5` default, configurable). Output to Redis under `pca:*`. Persist the artifact on every loop.
+6. **Drift.** Centroid shift + variance shift, averaged. Output to Redis under `drift:*`.
+7. **Risk.** Rules-based classification from the drift score (thresholds in `config.py`). Output to `model:prediction` and `model:confidence`. Confidence is the normalized band-edge distance, not a learned probability.
+8. **Heartbeat.** `ml:heartbeat` and `ml:last_run` are written on every cycle so the dashboard's WorkerCard reflects liveness even when the source is empty.
+9. **Validate.** When a new source is wired, run for at least one full `ML_WORKER_SLEEP` cycle and check the dashboard renders. Then check the bucket transitions: bump a synthetic drift to verify the classifier fires at the right edges.
 
-## PCA with numpy
+## PCA with numpy (the working approach)
 
-Principal component analysis is the default dimensionality-reduction tool when the goal is speed, not inference. Prefer numpy SVD over a hand-rolled covariance eigendecomposition — it is numerically stable and keeps an sklearn dependency out of hot paths:
+This repo's `core/ml/pca_engine.py` runs the math by computing the covariance matrix on the standardized data and taking `np.linalg.eigh`. That is mathematically correct and runs in pure numpy; the canonical `eda-econometrics-numpy` skill notes that SVD on centered data is numerically preferable for ill-conditioned matrices, but for the working `n_samples` and feature counts here, `eigh` is fine. Do not rewrite it speculatively.
 
-```python
-import numpy as np
+Rules:
 
-def fit_pca(X, n_components=None, target_variance=0.95):
-    X = np.asarray(X, dtype=np.float32)
-    X = (X - X.mean(axis=0))                       # center; standardize if scales differ
-    u, s, vt = np.linalg.svd(X, full_matrices=False)
-    evr = (s ** 2) / (s ** 2).sum()                # explained variance ratios
-    k = n_components or int((np.cumsum(evr) >= target_variance).argmax()) + 1
-    return {"mean": X.mean(axis=0), "components": vt[:k], "explained_variance": evr[:k]}
+- **Fit on the current batch only.** The worker loop runs `pca_engine.compute_pca(embeddings)` inside `ml_worker.run_cycle`. No held-out reference is required because the pipeline does not train a supervised model.
+- **Standardize first.** Mandatory when feature scales differ. `pca_engine.py` already does this.
+- **Pick `k` from the explained-variance curve.** `PCA_COMPONENTS = 5` is the default; bump or drop from the curve and record the choice in `config.py` + the session file.
+- **Persist every fit.** All six output fields are written to Redis on every cycle. The Node API reads them as the dashboard's source of truth.
+- **`sklearn.decomposition.PCA`** is not used. `core/ml/requirements.txt` does not list `scikit-learn` or `scipy`.
 
-def apply_pca(fit, X):
-    X = np.asarray(X, dtype=np.float32)
-    return (X - fit["mean"]) @ fit["components"].T
-```
+## Drift + risk (the post-Keras layer)
 
-Rules for PCA use:
+After the Keras/TFLite drop, `core/ml/ml_worker.py` no longer trains a model. The risk classification is `core/ml/risk_classifier.classify_risk(drift_score)`:
 
-- **Fit on training data only**; apply the same fitted transform to val/test/prod. Fitting on the full dataset is leakage.
-- **Standardize** (unit variance) first when feature scales differ, or the largest-magnitude features dominate the components.
-- Choose `k` from the explained-variance curve (e.g. 95%), not an arbitrary dimension count.
-- The fitted transform is an **artifact**: persist mean + components once, load at service startup, never re-fit per request.
-- numpy is preferred for inference-time transforms. `sklearn.decomposition.PCA` is fine for offline exploration and training.
+- Bucketed by thresholds: `[0, 0.25)` → Low, `[0.25, 0.5)` → Medium, `[0.5, 0.75)` → High, `[0.75, ∞)` → Critical.
+- Confidence is the normalized distance from the band edge (deterministic, in `[0.5, 1.0]`). It is a rule margin, not a learned probability.
+- The dashboard reads `model:prediction` and `model:confidence` via `core/node-api/src/routes/ml.ts`. Those keys are produced by the ML worker and consumed read-only by the Node API.
 
-## Low-latency and non-redundancy checklist
-
-- **Load artifacts at startup**, never per request: fitted PCA/scalers, vocabularies, model weights.
-- **Vectorize with numpy**; use float32 for inference. No Python loops over large arrays in hot paths.
-- **Batch offline scoring**; keep online inference lean — small model, precomputed per-tenant features.
-- **Cache consciously:** identical requests or repeated computations served from cache; invalidate when the data/feature/model version changes.
-- **One preprocessing pipeline** shared by train and serve, so train/serve skew is impossible.
-- **Avoid redundant ETL:** a feature store or materialized views mean the pipeline never recomputes the same feature in N places.
-- **Profile before optimizing.** Use the repo's logging to measure p50/p95/p99; optimize what the data blames.
+The Redis ACLs enforce the boundary: the `ml` user produces, the `nodeapi` user reads, `default` is off. See `security-rbac-zero-trust` for the full posture.
 
 ## Serving to the TypeScript/Node stack
 
-- Data science ships as an internal **microservice** (e.g. FastAPI) exposing REST endpoints the Node backend calls.
-- **Contract-first, aligned with this repo:** request/response schemas live in the shared `contract/` (frontend repo owns it, backend mirrors it). The Python service mirrors that contract with pydantic models — the same discipline as zod on the TS side. Never let the Python API drift from the contract.
-- The service is **stateless and horizontally scalable**; model versions pinned via a registry or artifact store.
-- **Environments** via env config (dev/prod), matching repo conventions. No secrets or model paths hardcoded.
-- Structured logging with per-endpoint latency metrics; tenant-scoped where multi-tenant, using the `x-org-id` convention.
+The serving path is **Redis → Node API → React dashboard**. No FastAPI, no pydantic, no shared `contract/` folder.
+
+- `core/ml` writes to Redis. It is a worker loop, not an HTTP service. It has no exposed ports.
+- `core/node-api` is an Express/TypeScript read-only layer over Redis. Hand-written validation, no zod. It mirrors the Redis key shape to a JSON response. The ML keys it reads are listed under `REDIS_PASSWORD_NODEAPI` in the per-service ACL.
+- `core/pca-backend` is a React + Vite + Recharts dashboard, served by nginx on the only public port (80). It polls `/api/ml/*` and renders. It never touches Redis directly.
+- Contract changes start in `core/pca-backend` (the consumer). `core/node-api` updates its route handlers and the `core/pca-backend/src/types/ml.ts` to match. The two repos are not cloned side-by-side; this is a single repo with three services.
+
+There is no `core/llm` and no `core/vdb` (deleted 2026-10-24). Do not reintroduce them.
 
 ## Reference stack and libraries
 
-- **Preprocessing / EDA:** numpy, pandas, scipy, scikit-learn.
-- **Modeling:** TensorFlow / Keras (Sequential or functional API), trained with a fixed seed.
-- **Service:** FastAPI (pydantic for contract validation, structlog/JSON logging) or TensorFlow Serving when a dedicated inference endpoint is warranted.
-- **Artifacts:** model plus fitted transforms saved with versioned filenames (e.g. `v<YYYY-MM-DD>-<run>`), alongside the matching `.ai/` session and decision records.
+- **Math:** `numpy` only. No `scipy`, no `scikit-learn`, no `pandas`. The arithmetic here is small enough that numpy primitives win on clarity and dependency surface.
+- **Storage:** `redis` (Python client). One user, `ml`, scoped by `redis/users.acl.template`.
+- **Serving:** `core/node-api` is Express + `ioredis`. Hand-written validators; no zod, no pydantic.
+- **Dashboard:** React + Vite + Recharts + Tailwind. TypeScript strict mode.
+- **Artifacts:** Each cycle writes a fresh PCA fit to Redis. No on-disk model files. The `/app/models` directory created by `core/ml/Dockerfile` is no longer needed — see Phase 4.
 
 ## Senior-level gotchas
 
-- **Leakage** is the most common silent error: any transform using the full dataset (PCA fit, scaling, imputation) inflates eval metrics. Fit on train only.
-- **Imbalanced targets:** report precision/recall/AUC, never accuracy alone.
-- **Drift:** a model that wins at eval can rot in prod. Track input distributions; alert on drift before accuracy complaints arrive.
-- **"Works in prod once" is not done.** Add monitoring and a rollback before deploy.
-- **Never invent numbers.** If a metric, baseline, or data fact is not in code or memory, ask the user.
-- Record confirmed modeling decisions immediately in `.ai/decisions/`, the moment the user confirms them, per the `repo-memory` skill (`.claude/skills/repo-memory/SKILL.md`).
+- **Dormant pipeline is a known state, not a bug.** With no data source wired, the loop runs and skips PCA/drift/risk. `ml:heartbeat` and `ml:last_run` still tick. The dashboard's WorkerCard stays Healthy; the PCA / Drift / Risk cards show whatever was last written (or nothing).
+- **Rules-based risk is not anomaly detection.** Centroid+variance shift detects *shifts* of the distribution. It does not detect *novel points*. Do not sell it as anomaly detection.
+- **Risk confidence is a rule margin.** `(0.5, 1.0]` from the band-edge distance. Multiplying by 100 in the dashboard's `RiskCard` reads as a percentage but is a rule-side metric, not a learned probability.
+- **Drift vs. novelty vs. outlier.** A baseline window would let us catch drift against a frozen reference; the current heuristic is single-window. A future enhancement would store a snapshot and compare.
+- **Re-running a cycle is not a regression test.** Determinism is rule-based, not snapshot-based. If you need a regression test, capture a synthetic input + expected output and run it in `py_compile` mode — there is no pytest harness in this repo, by AGENTS.md design.
+- **Never invent numbers.** If a threshold, a drift score, or a model fact is not in code or memory, ask the user.
+- Record confirmed modeling decisions immediately in `.ai/decisions/`, the moment the user confirms them, per the `repo-memory` skill.

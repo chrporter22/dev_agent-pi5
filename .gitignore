@@ -40,6 +40,16 @@ dist/
 htmlcov/
 
 # --------------------------------------------------
+# NODE
+# --------------------------------------------------
+# Each service has its own lockfile and node_modules; both are reproducible
+# from the Dockerfile (services `npm install` inside the image) and from
+# `package.json` (which is committed). Keeping these out of git keeps the
+# tree clean and avoids churn from platform-specific binaries.
+node_modules/
+package-lock.json
+
+# --------------------------------------------------
 # DOCKER
 # --------------------------------------------------
 docker-compose.override.yml

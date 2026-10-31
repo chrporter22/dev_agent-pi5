@@ -2,21 +2,14 @@
 set -Eeuo pipefail
 
 # -------------------------
-# ENV CHECKS
-# -------------------------
-# This repo no longer ships a local LLM model. `openclaw-llm` is a thin
-# Flask proxy to an external LiteLLM gateway (configured via env). Required
-# gateway env vars must already be present in `.env` before this script runs.
-
-log() { echo -e "\033[1;32m[INFO]\033[0m $1"; }
-warn() { echo -e "\033[1;33m[WARN]\033[0m $1"; }
-error() { echo -e "\033[1;31m[ERROR]\033[0m $1"; exit 1; }
-
-# -------------------------
 # ARCH CHECK
 # -------------------------
 ARCH=$(uname -m)
 [[ "$ARCH" == "aarch64" ]] || error "ARM64 required"
+
+log() { echo -e "\033[1;32m[INFO]\033[0m $1"; }
+warn() { echo -e "\033[1;33m[WARN]\033[0m $1"; }
+error() { echo -e "\033[1;31m[ERROR]\033[0m $1"; exit 1; }
 
 log "Architecture OK"
 
@@ -40,7 +33,7 @@ docker compose version >/dev/null || error "Docker Compose missing"
 log "Docker OK"
 
 # -------------------------
-# GATEWAY CONFIG CHECK
+# ENV CHECK
 # -------------------------
 if [[ -f ".env" ]]; then
     set -a
@@ -49,58 +42,44 @@ if [[ -f ".env" ]]; then
     set +a
 fi
 
+[[ -n "${TELEGRAM_TOKEN:-}" ]]   || error "TELEGRAM_TOKEN missing from .env"
+[[ -n "${REDIS_PASSWORD:-}" ]]   || error "REDIS_PASSWORD missing from .env"
 [[ -n "${AI_GATEWAY_BASE_URL:-}" ]] || error "AI_GATEWAY_BASE_URL missing from .env"
 [[ -n "${AI_GATEWAY_API_KEY:-}" ]]  || error "AI_GATEWAY_API_KEY missing from .env"
-[[ -n "${AI_GATEWAY_MODEL:-}" ]]    || error "AI_GATEWAY_MODEL missing from .env"
 
-log "AI gateway env OK"
-
-# -------------------------
-# VDB BOOTSTRAP (SAFE RUN)
-# -------------------------
-if [[ -f "./bootstrap_vdb.sh" ]]; then
-    log "Bootstrapping VDB"
-    ./bootstrap_vdb.sh
-else
-    warn "Skipping VDB bootstrap"
-fi
+log "Environment OK"
 
 # -------------------------
-# BUILD LLM PROXY
+# BUILD ALL SERVICES
 # -------------------------
-log "Building LLM proxy"
-docker compose build openclaw-llm
+log "Building all services"
+
+docker compose -f docker-compose.prod.yml build
 
 # -------------------------
 # START SYSTEM
 # -------------------------
-log "Starting LLM proxy"
-docker compose up -d openclaw-llm
+log "Starting stack"
+
+docker compose -f docker-compose.prod.yml up -d
 
 sleep 5
 
 # -------------------------
 # BASIC HEALTH CHECK
 # -------------------------
-RUNNING=$(docker inspect -f '{{.State.Running}}' openclaw-llm 2>/dev/null || echo "false")
+RUNNING=$(docker inspect -f '{{.State.Running}}' openclaw-bot 2>/dev/null || echo "false")
 
-[[ "$RUNNING" == "true" ]] || error "LLM proxy failed to start"
+[[ "$RUNNING" == "true" ]] || warn "openclaw-bot may not have started"
 
-log "LLM proxy container running"
+RUNNING=$(docker inspect -f '{{.State.Running}}' openclaw-worker 2>/dev/null || echo "false")
 
-# OPTIONAL: API CHECK (if Flask is exposed internally)
-if curl -s http://localhost:8080/health >/dev/null 2>&1; then
-    log "LLM proxy API responsive"
-else
-    warn "LLM proxy API not reachable yet (may still be booting)"
-fi
+[[ "$RUNNING" == "true" ]] || warn "openclaw-worker may not have started"
 
+log "Stack is running"
 echo ""
-log "Bootstrap complete"
 echo "--------------------------------"
-echo "LLM: openclaw-llm (proxy)"
-echo "Gateway: ${AI_GATEWAY_BASE_URL}"
-echo "Gateway model: ${AI_GATEWAY_MODEL}"
+echo "Services: openclaw-bot, openclaw-worker, redis, openclaw-ml, node-api, pca-backend"
 echo "RAM: ${TOTAL_MEM_GB}GB"
 echo "Arch: $ARCH"
 echo "--------------------------------"

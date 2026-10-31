@@ -5,7 +5,7 @@ import redis from "../redis/client"
 import {
   getJsonKey,
   getStringKey
-} from "../utils/redisHelpers"
+} from "../utils/redisHelper"
 
 const router = express.Router()
 
@@ -138,9 +138,9 @@ router.get("/drift", async (_, res) => {
   })
 })
 
-# ----------------------------------
-# RISK
-# ----------------------------------
+// ----------------------------------
+// RISK
+// ----------------------------------
 
 router.get("/risk", async (_, res) => {
 

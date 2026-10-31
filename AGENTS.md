@@ -119,33 +119,32 @@ These sit on top of the mandatory rules and engineering standards above. Where t
 
 ## What this project is
 
-DEV AGENT Pi — a zero-trust, fully containerized AI + analytics stack for a Raspberry Pi 5 (ARM64, 16GB, Arch Linux). Request path:
+DEV AGENT Pi — a zero-trust, fully containerized Telegram coding-task interface for a Raspberry Pi 5 (ARM64, 16GB, Arch Linux). Request path:
 
-`Telegram → core/bot → core/llm → core/vdb → core/node-api → core/ml → core/pca-backend`
+`Telegram → core/bot → Redis queue → core/bot worker → ai-gateway (external)`
+`core/ml → Redis → core/node-api → core/pca-backend (dashboard)`
 
 ## Deviations from the Engineering Standards
 
-- **No MongoDB.** Persistence is SQLite via `sqlite-utils` in `core/vdb`. SQLite is the source of truth; `/data/index.bin` (FAISS `IndexFlatIP`) is a disposable derived index rebuilt from SQLite. Redis is a cache and job transport only, never a source of truth.
+- **No MongoDB.** All persistence is in Redis (job queue + PCA/ML state). There is no SQL database.
 - **No zod.** Validation is hand-written per service.
-- **Not TypeScript everywhere.** `core/bot`, `core/llm`, `core/ml`, `core/vdb` are Python. `core/node-api` and `core/pca-backend` are TypeScript.
+- **Not TypeScript everywhere.** `core/bot` and `core/ml` are Python. `core/node-api` and `core/pca-backend` are TypeScript.
 - **No `contract/` folder.** `core/pca-backend` consumes `core/node-api` over HTTP through the nginx `/api/` proxy. There is no shared contract package, and `core/node-api` is strictly read-only over ML state: it must never compute PCA, retrain, or write ML keys.
 - **No `modules/<feature>/actions/` layout.** Services are organized by concern inside the service directory.
 - **Soft delete, multi-tenancy, and Firebase Auth do not apply.** There is no multi-tenant SaaS layer and no Firebase. The only auth is a Telegram bot token in env.
 
 ## Services
 
-- `core/bot` — `openclaw-bot` + `openclaw-worker`. Telegram polling, LLM command parsing, Redis job queue, creates `feature/<uuid>` branches and opens PRs. Never touches the host, the shell, or `main`.
-- `core/llm` — `openclaw-llm`. Thin stateless Flask proxy that forwards `POST /parse` to an external LiteLLM gateway (separate repo, user-owned) over `outbound_net`. Bearer auth, OpenAI-compatible `response_format: {"type": "json_object"}`, hand-written response validation. This service is the only one in the stack with egress to the gateway; `core/bot` keeps `internal_net`-only. The `POST /parse` contract returned to `core/bot` is unchanged.
-- `core/ml` — `openclaw-ml`. Background analytics loop with no HTTP API and no exposed ports. Embedding ingest → PCA (pure numpy, top 5 components) → drift detection → risk classification → Keras single-hidden-layer model with random hyperparameter search → TFLite export. Writes every output to Redis (`pca:*`, `drift:*`, `risk:latest`, `model:*`, `ml:heartbeat`, `ml:last_run`).
-- `core/vdb` — `openclaw-vdb`. FastAPI + FAISS + sentence-transformers semantic memory. Internal API on 8081: `POST /embed`, `POST /upsert`, `POST /search`, `GET /health`.
+- `core/bot` — `openclaw-bot` + `openclaw-worker`. Telegram polling, LLM command parsing, Redis job queue, calls external ai-gateway. Never touches the host, the shell, or `main`.
+- `core/ml` — `openclaw-ml`. Background analytics loop with no HTTP API and no exposed ports. Embedding ingest → PCA (pure numpy, top 5 components) → drift detection → rules-based risk classification. Writes every output to Redis (`pca:*`, `drift:*`, `risk:latest`, `model:*`, `ml:heartbeat`, `ml:last_run`). Keras + TFLite removed (Phase 4, 2026-10-31).
 - `core/node-api` — Express/TypeScript read-only ML layer on 3000, endpoints under `/api/ml/`.
 - `core/pca-backend` — React + Vite + Recharts + Tailwind dashboard served by nginx. **The only public ingress (80:80).**
 
 ## Stack and style
 
-- Python 3.11 (`core/bot`, `core/ml`) and 3.12 (`core/vdb`). Type hints are used in `core/vdb` and absent in `core/ml` — match the file you are editing, do not add or remove them repo-wide.
+- Python 3.11 (`core/bot`, `core/ml`). Type hints are absent in `core/ml` — match the file you are editing, do not add or remove them repo-wide.
 - Each Python service has a module-level `config.py` reading `os.getenv` with defaults and feature flags. Do not read env vars inline elsewhere.
-- Tests are stdlib `unittest` only, in `core/vdb/tests/`, imported as `core.vdb.app.*`. There is no pytest, no tox, and no coverage config.
+- There is no pytest, no tox, and no coverage config.
 - TypeScript: Node 22, double quotes, **no semicolons**, 2-space indent, `camelCase`.
 - React files live in `core/pca-backend/src/components/{ui,cards,charts,header}/`, hooks in `src/hooks/use*.ts`, types in `src/types/*.ts`, config at the service root.
 - Code comments use this repo's banner style: an all-caps title wrapped in rule characters, the file path on the first line, and `STEP 1 —` markers. Python uses `# --------------------------` or `# ==========================`; TypeScript uses `// ----------------------------------`.
@@ -153,7 +152,6 @@ DEV AGENT Pi — a zero-trust, fully containerized AI + analytics stack for a Ra
 
 ## Verification commands
 
-- `core/vdb` tests, from the repo root: `python3 -m unittest core.vdb.tests.test_vdb` (or `test_api`, `test_performance`). They import `core.vdb.app.*`, so the repo root must be the working directory, and `core/vdb/requirements.txt` must be installed — `faiss` and friends are container-only and are not on the host by default. An import error for a missing dep is an environment problem, not a code regression.
 - `core/node-api`: `npm run build` (tsc) in `core/node-api`.
 - `core/pca-backend`: `npm run build` (tsc + vite) in `core/pca-backend`. `npm run lint` is declared but **broken** — eslint is not in devDependencies and no config file exists. Do not treat its failure as a regression you caused.
 - **There is no repo-wide lint, format, or test command.** No Makefile, no CI, no pre-commit hooks, no Python linter or formatter. Verify per service and report what you could not run.
@@ -161,22 +159,27 @@ DEV AGENT Pi — a zero-trust, fully containerized AI + analytics stack for a Ra
 
 ## Docker and compose
 
-- `docker-compose.prod.yml` is authoritative: all 7 services, with `pca-backend` as the only published port.
+- `docker-compose.prod.yml` is authoritative: all 6 services, with `pca-backend` as the only published port.
 - `docker-compose.yml` is stale and dev-only. It is missing `node-api`, `openclaw-ml`, `pca-backend`, and `redis`, and it publishes `8081:8081`, which contradicts the internal-only rule. Never "fix" the prod file to match the dev file.
 - Every service runs `read_only: true` with tmpfs, `cap_drop: ALL`, and `no-new-privileges`. Keep it that way.
-- Secrets come from env only. The templates are the root `.env.example` and `core/vdb/.env.example`; `.env` itself is gitignored.
+- Secrets come from env only. The template is the root `.env.example`; `.env` itself is gitignored.
 
 ## Known-broken, pre-existing
 
 These are already broken on `main`. Do not re-diagnose them mid-task and do not bundle unrelated fixes into a change. Fix one only when the task calls for it, and say so in the plan.
 
-- `core/pca-backend/src/main.ts` contains JSX and must be `main.tsx`. It imports `./styles/globals.css` while the file on disk is `global.css`. `src/App.tsx` has a line-broken `import Dashboard\nfrom "./pages/Dashboard"` with no semicolon. There is no `core/pca-backend/index.html` even though `vite.config.ts` and `tailwind.config.ts` expect one.
-- `core/node-api/src/routes/ml.ts` imports `../utils/redisHelpers`; the file on disk is `redisHelper.ts`.
-- `core/vdb/Dockerfile` has `COPY ./bootstrap /app/bootstrap`; no `bootstrap/` directory exists.
-- `install.sh` still calls `./bootstrap_vdb.sh`, which calls `python3 ./core/vdb/populate_volume.py`; the file is at `core/vdb/scripts/populate_volume.py`.
-- The root `README.md` is a TODO/PRD/security-spec hybrid rather than a project README, and its `docker compose up -d` instructions do not start the three newer services.
+- `install.sh` is stale — it bootstraps the dev compose file and checks for removed services.
+- `core/ml/` data source is unwired. The pipeline runs as a dormant loop until a source is added; PCA/drift/risk are skipped and only the heartbeat ticks.
+
+Fixed by Phase 3 + Phase 4 (2026-10-31) and no longer on this list:
+
+- ~~`core/pca-backend/src/main.ts` must be `main.tsx`, imports `./styles/globals.css`, broken `App.tsx` import, missing `index.html`~~ — fixed.
+- ~~`core/node-api/src/routes/ml.ts` imports `../utils/redisHelpers`~~ — fixed.
+- ~~`core/node-api/src/redis/client.ts` reads `REDIS_URL`~~ — switched to `REDIS_HOST`/`REDIS_PORT`/`REDIS_USER`/`REDIS_PASSWORD`.
+- ~~`pca-backend/nginx.conf` trailing slash on `proxy_pass http://node-api:3000/;`~~ — fixed.
+- ~~`core/ml/embedding_client.py` calls vdb~~ — file removed; loop is now dormant by design until a new source is wired.
 
 ## Memory notes for this project
 
-- Worth recording in `.ai/decisions/`: the split of responsibility between `node-api` and `ml`, the SQLite-as-source-of-truth rule, why `pca-backend` is the only ingress, and any change to the Telegram → branch → PR flow.
+- Worth recording in `.ai/decisions/`: the split of responsibility between `node-api` and `ml`, why `pca-backend` is the only ingress, and any change to the Telegram → branch → PR flow.
 - The zero-trust constraints and the bot/PR security model are deliberate decisions, not incidental. Record the reasoning before changing them.

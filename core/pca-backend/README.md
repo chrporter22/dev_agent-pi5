@@ -427,7 +427,7 @@ core/
         │       └── SectionTitle.tsx
         │
         └── styles/
-            ├── globals.css
+            ├── global.css
             ├── viridis.css
             └── dashboard.css
 ```

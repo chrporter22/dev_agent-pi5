@@ -56,7 +56,7 @@ core/
     │   │
     │   ├── utils/
     │   │   ├── safeJsonParse.ts
-    │   │   └── redisHelpers.ts
+    │   │   └── redisHelper.ts
     │   │
     │   └── types/
     │       └── ml.ts
@@ -121,14 +121,17 @@ src/redis/client.ts
 ## REQUIREMENTS
 
 * use `ioredis`
-* connect using `REDIS_URL`
+* connect using `REDIS_HOST` + `REDIS_PORT` + `REDIS_USER` + `REDIS_PASSWORD` (no `REDIS_URL`)
 * log Redis connection status
 * support Docker internal networking
 
 Example:
 
 ```env
-REDIS_URL=redis://redis:6379
+REDIS_HOST=redis
+REDIS_PORT=6379
+REDIS_USER=nodeapi
+REDIS_PASSWORD=<REDACTED:ENV_VALUE>
 ```
 
 ---
@@ -154,7 +157,7 @@ Prevent API crashes from malformed Redis payloads.
 ## FILE
 
 ```text
-src/utils/redisHelpers.ts
+src/utils/redisHelper.ts
 ```
 
 ## REQUIRED HELPERS

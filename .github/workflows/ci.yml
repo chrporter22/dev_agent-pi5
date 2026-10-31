@@ -1,0 +1,112 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  python-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: py_compile core/bot
+        run: |
+          python -m py_compile core/bot/*.py
+        working-directory: ${{ github.workspace }}
+
+      - name: py_compile core/ml
+        run: |
+          python -m py_compile core/ml/*.py
+        working-directory: ${{ github.workspace }}
+
+      - name: Check for stale symbols
+        run: |
+          echo "=== Checking for stale symbols ==="
+          # keras/tflite should not appear (Phase 4 removed them)
+          if grep -rE "Keras|tflite|model\.keras|embedding_client" core/ --include="*.py" 2>/dev/null; then
+            echo "ERROR: Stale Keras/TFLite symbols found"
+            exit 1
+          fi
+          # globals.css (should be global.css)
+          if grep -r "globals\.css" core/ --include="*.tsx" --include="*.ts" 2>/dev/null; then
+            echo "ERROR: Stale globals.css reference found"
+            exit 1
+          fi
+          # redisHelpers (should be redisHelper)
+          if grep -r "redisHelpers" core/ --include="*.ts" 2>/dev/null; then
+            echo "ERROR: Stale redisHelpers reference found"
+            exit 1
+          fi
+          # REDIS_URL (should be REDIS_HOST/PORT/USER/PASSWORD)
+          if grep -r "REDIS_URL" core/ --include="*.ts" 2>/dev/null; then
+            echo "ERROR: Stale REDIS_URL reference found"
+            exit 1
+          fi
+          echo "=== No stale symbols found ==="
+
+      - name: Secret scan
+        run: |
+          echo "=== Scanning for leaked secrets ==="
+          # Scan for common secret patterns
+          if grep -rE "sk-[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{36,}|AKIA[0-9A-Z]{16}|xox[baprs]-[0-9]{10,}" . --include="*.py" --include="*.ts" --include="*.tsx" --include="*.yml" --include="*.yaml" 2>/dev/null; then
+            echo "ERROR: Potential secret found"
+            exit 1
+          fi
+          echo "=== No secrets found ==="
+
+  node-api-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install and build core/node-api
+        run: |
+          cd core/node-api
+          npm install
+          npm run build
+        working-directory: ${{ github.workspace }}
+
+  pca-backend-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install and build core/pca-backend
+        run: |
+          cd core/pca-backend
+          npm install
+          npm run build
+        working-directory: ${{ github.workspace }}
+
+  docker-compose-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate docker-compose.prod.yml
+        run: |
+          python3 -c "import yaml; yaml.safe_load(open('docker-compose.prod.yml'))"
+        working-directory: ${{ github.workspace }}
+
+      - name: Validate shell scripts
+        run: |
+          bash -n redis/entrypoint.sh
+        working-directory: ${{ github.workspace }}

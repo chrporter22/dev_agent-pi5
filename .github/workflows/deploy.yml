@@ -1,0 +1,84 @@
+name: Deploy
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  docker-build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Build and push bot image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./core/bot
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}/bot:${{ steps.version.outputs.VERSION }}
+            ghcr.io/${{ github.repository }}/bot:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push ml image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./core/ml
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}/ml:${{ steps.version.outputs.VERSION }}
+            ghcr.io/${{ github.repository }}/ml:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push node-api image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./core/node-api
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}/node-api:${{ steps.version.outputs.VERSION }}
+            ghcr.io/${{ github.repository }}/node-api:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push pca-backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./core/pca-backend
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}/pca-backend:${{ steps.version.outputs.VERSION }}
+            ghcr.io/${{ github.repository }}/pca-backend:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push redis image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./redis
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}/redis:${{ steps.version.outputs.VERSION }}
+            ghcr.io/${{ github.repository }}/redis:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

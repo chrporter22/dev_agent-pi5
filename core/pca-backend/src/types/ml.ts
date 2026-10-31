@@ -18,9 +18,9 @@ export interface PcaSummary {
 
   driftClassification?: string
 
-  risk: string
+  risk?: string
 
-  confidence: number
+  confidence?: number
 
   heartbeat?: number
 

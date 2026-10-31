@@ -1,5 +1,7 @@
 FROM python:3.11-alpine
 
+RUN apk add --no-cache git
+
 RUN addgroup -S botgroup && adduser -S botuser -G botgroup
 
 WORKDIR /app

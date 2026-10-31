@@ -1,85 +1,68 @@
 # /core/ml/ml_worker.py
 
-import os
-import time
-import numpy as np
 import json
-from embedding_client import fetch_embeddings
-from model_trainer import run_training
+import time
+
 from pca_engine import compute_pca
 from drift_detector import compute_drift
-from model_runtime import RiskModel
+from risk_classifier import classify_risk
 from redis_store import (
+    redis_client,
     store_json,
-    store_value,
-    redis_client
-)
-from config import (
-    ML_WORKER_SLEEP,
-    ENABLE_MODEL_TRAINING
+    store_value
 )
 
-# --------------------------------------------------
-# MODEL RUNTIME
-# --------------------------------------------------
-try:
-    risk_model = RiskModel()
-
-except:
-    risk_model = None
-
-TRAIN_INTERVAL = 3600  # 1 hour
-
-last_training_time = 0
-
-# --------------------------------------------------
-# CLASS LABELS
-# --------------------------------------------------
-
-RISK_LABELS = {
-    0: "Low",
-    1: "Medium",
-    2: "High",
-    3: "Critical"
-}
+from config import ML_WORKER_SLEEP
 
 
 # --------------------------------------------------
-# PROCESS PIPELINE
+# HELPERS
 # --------------------------------------------------
 
-def generate_labels(drift_score, count):
+def _classify_drift(score):
+    """Bucket a raw drift score for the dashboard's drift card."""
 
-    if drift_score < 0.25:
-        label = 0
+    if score < 0.25:
+        return "Stable"
 
-    elif drift_score < 0.5:
-        label = 1
+    if score < 0.5:
+        return "Moderate"
 
-    elif drift_score < 0.75:
-        label = 2
+    if score < 0.75:
+        return "High"
 
-    else:
-        label = 3
+    return "Critical"
 
-    return np.full(
-        count,
-        label,
-        dtype=np.int32
-    )
 
-def process_embeddings():
+def _heartbeat():
+    """Always-on liveness signals. Written every cycle, even when no data
+    is available, so the dashboard's WorkerCard stays accurate."""
 
-    embeddings = fetch_embeddings()
+    now = int(time.time())
 
-    # ----------------------------------
-    # SAFE EMPTY STATE
-    # ----------------------------------
+    store_value("ml:heartbeat", now)
+    store_value("ml:last_run", now)
+
+
+def _load_embeddings():
+    """Data source is currently unwired (the vdb source was removed along
+    with `core/vdb` in the 2026-10-24 simplify). When a source is wired,
+    replace this stub with the actual fetch.
+    """
+
+    return None
+
+
+# --------------------------------------------------
+# MAIN LOOP
+# --------------------------------------------------
+
+def run_cycle():
+    embeddings = _load_embeddings()
 
     if embeddings is None or len(embeddings) < 2:
-
-        print("Not enough embeddings yet")
-
+        print("[ML] No data source wired -- pipeline idle")
+        _heartbeat()
         return
 
     # ----------------------------------
@@ -88,33 +71,24 @@ def process_embeddings():
 
     pca_result = compute_pca(embeddings)
 
-    projection = np.array(
-        pca_result["projection"],
-        dtype=np.float32
-    )
+    projection = pca_result["projection"]
 
     store_json(
         "pca:latest",
-        projection.tolist()
+        projection
     )
-    # ----------------------------------
-    # PCA HISTORY BUFFER
-    # ----------------------------------
 
     redis_client.lpush(
         "pca:history",
-        json.dumps(
-            projection.tolist()
-        )
+        json.dumps(projection)
     )
 
-    # Keep latest 100 snapshots
     redis_client.ltrim(
         "pca:history",
         0,
         100
     )
-    
+
     store_json(
         "pca:components",
         pca_result["components"]
@@ -124,11 +98,7 @@ def process_embeddings():
         "pca:variance",
         pca_result["variance"]
     )
-    
-    store_value(
-        "pca:total_variance",
-        pca_result["total_variance_explained"]
-    )
+
     store_json(
         "pca:eigenvalues",
         pca_result["eigenvalues"]
@@ -143,186 +113,57 @@ def process_embeddings():
         "pca:std",
         pca_result["std"]
     )
+
+    store_value(
+        "pca:total_variance",
+        pca_result["total_variance_explained"]
+    )
+
     # ----------------------------------
     # DRIFT
     # ----------------------------------
+
     drift = compute_drift(embeddings)
+    drift_score = float(drift["drift_score"])
 
-    drift_score = float(
-        drift["drift_score"]
-    )
-
-    store_value(
-        "drift:score",
-        drift_score
-    )
+    store_value("drift:score", drift_score)
+    store_value("drift:classification", _classify_drift(drift_score))
 
     # ----------------------------------
-    # DRIFT CLASSIFICATION
+    # RISK (rules-based, deterministic)
     # ----------------------------------
 
-    if drift_score < 0.25:
+    risk_label, confidence = classify_risk(drift_score)
 
-        classification = "Stable"
-
-    elif drift_score < 0.5:
-
-        classification = "Moderate"
-
-    elif drift_score < 0.75:
-
-        classification = "High"
-
-    else:
-
-        classification = "Critical"
-
-    store_value(
-        "drift:classification",
-        classification
-    )
-    
-    # ----------------------------------
-    # MODEL TRAINING
-    # ----------------------------------
-    
-    global last_training_time
-    global risk_model
-
-    current_time = time.time()
-
-    if (
-        ENABLE_MODEL_TRAINING
-        and current_time - last_training_time
-            > TRAIN_INTERVAL
-        ):
-
-        try:
-
-            print("[ML] Starting scheduled retraining")
-
-            features = projection
-
-            labels = generate_labels(
-                drift_score,
-                len(features)
-                )
-
-            run_training(
-                features,
-                labels
-                )
-
-            # Reload latest TFLite model
-            risk_model = RiskModel()
-
-            last_training_time = current_time
-
-            print(
-            "[ML] Model retrained + runtime reloaded"
-            )
-
-        except Exception as e:
-
-            print(
-                f"[TRAIN ERROR] {e}"
-            )
-    # ----------------------------------
-    # MODEL INFERENCE
-    # ----------------------------------
-
-    if len(projection) == 0:
-
-        print("[ML] Empty PCA projection")
-
-        return
-
-    latest_features = projection[-1]
-
-    if risk_model is not None:
-
-        prediction = risk_model.predict(
-            latest_features
-        )
-
-        prediction_id = prediction["prediction"]
-
-        risk_label = RISK_LABELS.get(
-            prediction_id,
-            "Unknown"
-        )
-
-        confidence = prediction["confidence"]
-
-    else:
-
-        print("[ML] Risk model unavailable")
-
-        risk_label = "Unknown"
-
-        confidence = 0.0
+    store_value("model:prediction", risk_label)
+    store_value("model:confidence", confidence)
+    store_value("risk:latest", risk_label)
 
     # ----------------------------------
-    # STORE MODEL OUTPUTS
+    # HEARTBEAT
     # ----------------------------------
 
-    store_value(
-        "model:prediction",
-        risk_label
-    )
+    _heartbeat()
 
-    store_value(
-        "model:confidence",
-        confidence
-    )
-
-    store_value(
-        "risk:latest",
-        risk_label
-    )
-    
-    store_value(
-        "ml:heartbeat",
-        int(time.time())
-    )
-    
-    store_value(
-        "ml:last_run",
-        int(time.time())
-    )
-    
     print(
-        f"[ML] "
-        f"Risk={risk_label} "
-        f"Confidence={confidence:.4f}"
+        f"[ML] risk={risk_label} "
+        f"drift={drift_score:.4f} "
+        f"confidence={confidence:.4f}"
     )
 
-# --------------------------------------------------
-# MAIN LOOP
-# --------------------------------------------------
 
 def main():
-
-    print("ML worker started...")
-
-    os.makedirs(
-        "/app/models",
-        exist_ok=True
-    )
+    print("ML worker started (numpy + rules)...")
 
     while True:
 
         try:
-
-            process_embeddings()
+            run_cycle()
 
         except Exception as e:
-
             print(f"[ML ERROR] {e}")
 
-        time.sleep(
-            ML_WORKER_SLEEP
-        )
+        time.sleep(ML_WORKER_SLEEP)
 
 
 if __name__ == "__main__":
