@@ -6,6 +6,7 @@ import redis
 import requests
 
 from config import (
+    AI_GATEWAY_ALLOWED_MODELS,
     ALLOWED_USER,
     DEFAULT_REPO,
     REDIS_HOST,
@@ -396,6 +397,14 @@ def handle_message(msg):
 
         if not model:
             send_message(chat_id, "Usage: /model <name>")
+            return
+
+        if model not in AI_GATEWAY_ALLOWED_MODELS:
+            send_message(
+                chat_id,
+                f"Unknown model: {model}\n"
+                f"Allowed: {', '.join(AI_GATEWAY_ALLOWED_MODELS)}"
+            )
             return
 
         chat_store.set_model(chat_id, model)

@@ -15,6 +15,8 @@ sed \
   -e "s#\${REDIS_PASSWORD_ML}#${REDIS_PASSWORD_ML}#g" \
   -e "s#\${REDIS_PASSWORD_NODEAPI}#${REDIS_PASSWORD_NODEAPI}#g" \
   /usr/local/etc/redis/users.acl.template \
+  | grep -v '^[[:space:]]*#' \
+  | grep -v '^[[:space:]]*$' \
   > /usr/local/etc/redis/users.acl
 
 chmod 644 /usr/local/etc/redis/users.acl

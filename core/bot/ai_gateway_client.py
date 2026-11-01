@@ -1,11 +1,17 @@
 import json
 import random
 import time
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 
 import requests
 
-from config import AI_GATEWAY_API_KEY, AI_GATEWAY_BASE_URL, AI_GATEWAY_MODEL
+from config import (
+    AI_GATEWAY_API_KEY,
+    AI_GATEWAY_BASE_URL,
+    AI_GATEWAY_MAX_TOKENS,
+    AI_GATEWAY_MODEL,
+    AI_GATEWAY_TIMEOUT
+)
 
 # ============================================================================
 # AI GATEWAY CLIENT — core/bot/ai_gateway_client.py
@@ -16,11 +22,22 @@ from config import AI_GATEWAY_API_KEY, AI_GATEWAY_BASE_URL, AI_GATEWAY_MODEL
 # ----------------------------------
 # CONFIG
 # ----------------------------------
-TIMEOUT = 30
+TIMEOUT = AI_GATEWAY_TIMEOUT
 MAX_RETRIES = 3
 BACKOFF_BASE = 0.5
 
 GATEWAY_CHAT_PATH = "/v1/chat/completions"
+SESSION_HEADER = "x-session-id"
+
+
+# ----------------------------------
+# ERRORS
+# ----------------------------------
+class GatewayHttpError(RuntimeError):
+    def __init__(self, message: str, status_code: int):
+        super().__init__(message)
+        self.status_code = status_code
+
 
 
 # ----------------------------------
@@ -66,20 +83,32 @@ PLAN_CHANGES_SYSTEM_PROMPT = (
 # PRIVATE HELPERS
 # ----------------------------------
 def _safe_parse_json(text: str) -> Dict[str, Any]:
+    if text is None:
+        raise ValueError("Gateway returned an empty message body")
+
     text = text.strip()
 
     if text.startswith("```"):
         lines = text.splitlines()
         text = "\n".join(lines[1:-1]) if len(lines) > 2 else ""
 
-    return json.loads(text)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as e:
+        raise ValueError(
+            f"Gateway returned malformed JSON ({e}). "
+            f"Response head: {text[:300]}"
+        ) from e
 
 
-def _request_gateway(body: Dict[str, Any]) -> str:
+def _request_gateway(body: Dict[str, Any], session_id: Optional[str] = None) -> str:
     headers = {
         "Authorization": f"Bearer {AI_GATEWAY_API_KEY}",
         "Content-Type": "application/json"
     }
+
+    if session_id:
+        headers[SESSION_HEADER] = session_id
 
     url = f"{AI_GATEWAY_BASE_URL.rstrip('/')}{GATEWAY_CHAT_PATH}"
 
@@ -90,28 +119,58 @@ def _request_gateway(body: Dict[str, Any]) -> str:
         timeout=TIMEOUT
     )
 
-    response.raise_for_status()
+    if response.status_code >= 400:
+        raise GatewayHttpError(
+            f"Gateway returned HTTP {response.status_code}: "
+            f"{response.text[:300]}",
+            status_code=response.status_code
+        )
 
     try:
         data = response.json()
-        return data["choices"][0]["message"]["content"]
+        choice = data["choices"][0]
+        content = choice["message"]["content"]
     except (KeyError, IndexError, ValueError) as e:
         raise ValueError(
             f"Gateway returned unexpected response: {response.text[:300]}"
         ) from e
 
+    if content is None:
+        finish_reason = choice.get("finish_reason", "unknown")
+        raise ValueError(
+            f"Gateway returned no message content (finish_reason={finish_reason}). "
+            f"Response: {response.text[:300]}"
+        )
 
-def _call_with_retry(body: Dict[str, Any], parse_fn: Callable[[str], Any]) -> Any:
+    if choice.get("finish_reason") == "length":
+        raise ValueError(
+            f"Gateway response was truncated at max_tokens={AI_GATEWAY_MAX_TOKENS}. "
+            f"Response head: {content[:300]}"
+        )
+
+    return content
+
+
+def _call_with_retry(
+    body: Dict[str, Any],
+    parse_fn: Callable[[str], Any],
+    session_id: Optional[str] = None
+) -> Any:
     last_error = None
 
     for attempt in range(MAX_RETRIES):
         try:
-            content = _request_gateway(body)
+            content = _request_gateway(body, session_id)
             return parse_fn(content)
+        except GatewayHttpError as e:
+            if e.status_code < 500 and e.status_code != 429:
+                raise
+            last_error = e
         except Exception as e:
             last_error = e
-            sleep_time = BACKOFF_BASE * (2 ** attempt) + random.uniform(0, 0.25)
-            time.sleep(sleep_time)
+
+        sleep_time = BACKOFF_BASE * (2 ** attempt) + random.uniform(0, 0.25)
+        time.sleep(sleep_time)
 
     raise RuntimeError(
         f"ai-gateway failed after {MAX_RETRIES} retries: {str(last_error)}"
@@ -121,37 +180,44 @@ def _call_with_retry(body: Dict[str, Any], parse_fn: Callable[[str], Any]) -> An
 # ----------------------------------
 # PUBLIC API
 # ----------------------------------
-def parse_instruction(instruction: str) -> Dict[str, Any]:
+def parse_instruction(
+    instruction: str,
+    session_id: Optional[str] = None
+) -> Dict[str, Any]:
     body = {
         "model": AI_GATEWAY_MODEL,
         "messages": [
             {"role": "system", "content": PARSE_SYSTEM_PROMPT},
             {"role": "user", "content": instruction}
         ],
-        "response_format": {"type": "json_object"}
+        "response_format": {"type": "json_object"},
+        "max_tokens": AI_GATEWAY_MAX_TOKENS
     }
 
-    return _call_with_retry(body, _safe_parse_json)
+    return _call_with_retry(body, _safe_parse_json, session_id)
 
 
 def chat(
     messages: List[Dict[str, str]],
     system: str = CHAT_SYSTEM_PROMPT,
-    model: Optional[str] = None
+    model: Optional[str] = None,
+    session_id: Optional[str] = None
 ) -> str:
     full_messages = [{"role": "system", "content": system}] + list(messages)
 
     body = {
         "model": model or AI_GATEWAY_MODEL,
-        "messages": full_messages
+        "messages": full_messages,
+        "max_tokens": AI_GATEWAY_MAX_TOKENS
     }
 
-    return _call_with_retry(body, lambda s: s.strip())
+    return _call_with_retry(body, lambda s: s.strip(), session_id)
 
 
 def plan_changes(
     instruction: str,
-    repo_context: Dict[str, Any]
+    repo_context: Dict[str, Any],
+    session_id: Optional[str] = None
 ) -> Dict[str, Any]:
     user_content = (
         f"Instruction: {instruction}\n\n"
@@ -164,7 +230,8 @@ def plan_changes(
             {"role": "system", "content": PLAN_CHANGES_SYSTEM_PROMPT},
             {"role": "user", "content": user_content}
         ],
-        "response_format": {"type": "json_object"}
+        "response_format": {"type": "json_object"},
+        "max_tokens": AI_GATEWAY_MAX_TOKENS
     }
 
-    return _call_with_retry(body, _safe_parse_json)
+    return _call_with_retry(body, _safe_parse_json, session_id)

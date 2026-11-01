@@ -17,8 +17,106 @@ openclaw-worker
    '-- /chat:   call ~/ai-gateway chat -> reply
 
 Analytics chain (dormant until a data source is wired):
-openclaw-ml (PCA, drift, rules-based risk) -> Redis -> node-api -> pca-backend (nginx :80)
+openclaw-ml (PCA, drift, rules-based risk) -> Redis -> node-api -> pca-backend (Node http server :80)
 ```
+
+---
+
+## Bring-up
+
+The only out-of-band step is creating a Telegram bot. Everything else runs in containers.
+
+### 1. Get a Telegram bot token from BotFather
+
+1. Open Telegram, message [@BotFather](https://t.me/BotFather).
+2. Send `/newbot`. Follow the prompts — pick a name and a username ending in `bot`.
+3. BotFather replies with an HTTP API token of the form `123456789:AA...`.
+4. (Optional but recommended) Send `/setprivacy` → Disable, so the bot can see all messages in a group.
+
+### 2. Get your numeric Telegram user id
+
+The bot only responds to one Telegram account (`ALLOWED_USER`). You need the numeric id, not the `@username`.
+
+- Message [@userinfobot](https://t.me/userinfobot). It replies with a `Id:` line. That number is yours.
+- Or run this once against the bot token (replace `<TOKEN>`): `curl -s "https://api.telegram.org/bot<TOKEN>/getMe" | jq .result.id` (that gives the bot id, not yours — use the userinfobot).
+
+### 3. Fill `.env`
+
+A `.env` file already ships pre-populated with random Redis passwords and a scoped gateway key. Edit only the Telegram values:
+
+```bash
+TELEGRAM_TOKEN=<paste from BotFather>
+ALLOWED_USER=<your numeric user id>
+```
+
+If you cloned the repo fresh and `.env` is missing:
+
+```bash
+cp .env.example .env
+# then edit the two lines above; everything else is fine for a first run
+```
+
+Optional:
+
+- `GITHUB_TOKEN` — only needed for `/build` to open a PR. Fine-grained PAT, scopes `contents:write` and `pull_requests:write` on the target repos.
+- `DEFAULT_REPO` — only needed if you want `/build <feature>` (no `owner/repo` prefix) to default somewhere.
+
+### 4. Start the stack
+
+```bash
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+Six containers come up; `pca-backend` is the only one that publishes a port (80). Open `http://<pi>/` to see the dashboard.
+
+### 5. Verify
+
+```bash
+docker compose -f docker-compose.prod.yml ps   # all Up; redis + worker Healthy
+curl http://localhost/api/ml/pca/summary        # 200, JSON
+```
+
+In Telegram, message your bot and send `/status`. The bot should reply with the queue + worker state. Send `/help` for the full command list.
+
+### 6. (Later) Mint a fresh gateway key
+
+The shipped `.env` carries a working key. If you need to mint a new one:
+
+```bash
+cd ~/ai-gateway
+./scripts/create-dev-key.sh dev-agent-pi5 20   # user label, $20 budget, 30 days
+```
+
+Paste the printed key into `AI_GATEWAY_API_KEY` in `.env` and restart the worker:
+
+```bash
+docker compose -f docker-compose.prod.yml up -d --force-recreate openclaw-worker
+```
+
+---
+
+## Bot commands
+
+The bot replies only to `ALLOWED_USER` and only via Telegram. Commands are case-sensitive and
+must start with `/`.
+
+| Command                                  | Effect                                                                |
+|------------------------------------------|-----------------------------------------------------------------------|
+| `/help`                                  | Print this command list in chat.                                      |
+| `/status`                                | Queue depth, queue:processing, queue:dead, last worker heartbeat.      |
+| `/chat <text>`                           | Free-text conversation with the gateway; per-chat history in Redis.   |
+| `/clear`                                 | Wipe the current chat's history.                                      |
+| `/model <name>`                          | Set a per-chat model override for `/chat`. Rejected if not in `AI_GATEWAY_ALLOWED_MODELS`. |
+| `/build [owner/repo] <feature>`          | Clone → plan with the gateway → apply → commit → push branch `dev-agent/<job-prefix>` → open PR. Returns the PR URL. |
+| `/jobs`                                  | List the most recent jobs (from `jobs:index`).                         |
+| `/job <id>`                              | Show a single job's status, step, error, PR URL.                      |
+| `/pr list`                               | List open PRs for `DEFAULT_REPO`.                                     |
+| `/pr <url\|num>`                         | Show one PR (title, state, branch, author, body).                     |
+| `/pr approve <url\|num>`                 | Merge a PR via the GitHub REST API.                                   |
+
+Anything else falls through to `/help`.
+
+Rate-limited by per-user Redis keys (see `core/bot/rate_limiter.py`); over-quota commands reply with "Rate limit exceeded."
 
 ---
 
@@ -71,13 +169,20 @@ cp .env.example .env
 #              AI_GATEWAY_BASE_URL, AI_GATEWAY_API_KEY, AI_GATEWAY_MODEL,
 #              GITHUB_TOKEN
 
-# 3. Build and start
+# 3. Mint a scoped gateway key (in the gateway repo)
+cd ~/ai-gateway
+LITELLM_URL=http://localhost:4000 bash scripts/create-dev-key.sh dev-agent-pi5 20 openclaw-bot
+#    -> copy the returned key into this repo's AI_GATEWAY_API_KEY
+
+# 4. Build and start
 docker compose -f docker-compose.prod.yml up -d --build
 
-# 4. Verify
+# 5. Verify
 docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 docker logs openclaw-bot     # should poll Telegram with no errors
 docker logs openclaw-worker  # should show "Worker started..."
+docker exec openclaw-worker python -c \
+  "from ai_gateway_client import chat; print(chat([{'role':'user','content':'reply pong'}]))"
 ```
 
 First-run check in Telegram:
@@ -107,7 +212,7 @@ Owner-only (enforced via `ALLOWED_USER`). Rate limit: 10 commands/minute per use
 | `/job <id>`                      | Status + result for a specific job.                                   |
 | `/status`                        | System health (queue depth, processing, dead-letter, worker heartbeat). |
 | `/clear`                         | Wipe your chat history from Redis.                                    |
-| `/model <name>`                  | Set per-chat model override for `/chat` jobs only.                    |
+| `/model <name>`                  | Set per-chat model override for `/chat` jobs only. Must be in `AI_GATEWAY_ALLOWED_MODELS` (default: `company-coder`). |
 
 Anything else gets the help menu.
 
@@ -146,9 +251,9 @@ Required:
 - `TELEGRAM_TOKEN` — Telegram bot API token (from `@BotFather`).
 - `ALLOWED_USER` — Telegram user ID authorized to use the bot (numeric, from `@userinfobot`).
 - `REDIS_PASSWORD_BOT`, `REDIS_PASSWORD_WORKER`, `REDIS_PASSWORD_ML`, `REDIS_PASSWORD_NODEAPI` — one per Redis ACL user. Generate strong random per-service values.
-- `AI_GATEWAY_BASE_URL` — base URL of the user-owned gateway (e.g. `https://ai-gateway.example.com`).
-- `AI_GATEWAY_API_KEY` — bearer token for the gateway.
-- `AI_GATEWAY_MODEL` — default model name (e.g. `gpt-4o-mini`). Overridable per-chat via `/model`.
+- `AI_GATEWAY_BASE_URL` — base URL of the user-owned gateway **orchestrator**, e.g. `http://host.docker.internal:4001`. Do not point at LiteLLM directly (`:4000`) — that bypasses the gateway's decision logging, routing, and spend attribution.
+- `AI_GATEWAY_API_KEY` — bearer token for the gateway. Use a **scoped virtual key** minted by the gateway (`~/ai-gateway/scripts/create-dev-key.sh`), not the gateway's master key.
+- `AI_GATEWAY_MODEL` — default model name. The orchestrator exposes exactly `company-coder`.
 - `GITHUB_TOKEN` — fine-grained PAT with `contents: write` and `pull-requests: write` on target repos.
 
 Optional:
@@ -157,6 +262,9 @@ Optional:
 - `SANDBOX_DIR` — git workspace path inside the worker container (default `/sandbox`).
 - `CHAT_HISTORY_MAX_TURNS` — per-chat history depth (default 20).
 - `TELEGRAM_MAX_CHARS` — chunk size for Telegram replies (default 3800).
+- `AI_GATEWAY_TIMEOUT` — per-request HTTP timeout in seconds (default 150). Must exceed the longest observed call latency.
+- `AI_GATEWAY_MAX_TOKENS` — max tokens per call (default 8000). Without it the gateway's routing-tier cap truncates structured responses into unparseable JSON.
+- `AI_GATEWAY_ALLOWED_MODELS` — comma-separated models `/model` accepts (default `company-coder`).
 - `LOG_LEVEL` / `ML_LOG_LEVEL` — `info` (default) or `debug` / `INFO`.
 - `BOT_VERSION` — image tag for `openclaw/bot` (default `1.0.0`).
 
@@ -190,11 +298,15 @@ This is a zero-trust, fully containerized stack. Each layer enforces access on i
 
 | Redis user | Key patterns                                  | Command posture                                |
 |------------|-----------------------------------------------|------------------------------------------------|
-| `bot`      | `chat:*`, `queue:*`, `job:*`, `rate:*`, `worker:*` | full, minus dangerous commands               |
-| `worker`   | `chat:*`, `queue:*`, `job:*`, `worker:*`      | full, minus dangerous commands                 |
+| `bot`      | `chat:*`, `queue:*`, `job:*`, `jobs:*`, `rate:*`, `worker:*` | full, minus dangerous commands               |
+| `worker`   | `chat:*`, `queue:*`, `job:*`, `jobs:*`, `worker:*` | full, minus dangerous commands                 |
 | `ml`       | `pca:*`, `drift:*`, `risk:*`, `model:*`, `ml:*` | full, minus dangerous commands               |
-| `nodeapi`  | `pca:*`, `drift:*`, `risk:*`, `model:*`, `ml:heartbeat`, `ml:last_run` | read-only (`+get +hget +hgetall +lrange +zrange +zrevrange +exists +type +ttl +scan -@all`) |
+| `nodeapi`  | `pca:*`, `drift:*`, `risk:*`, `model:*`, `ml:heartbeat`, `ml:last_run` | read-only (`-@all +get +lrange +ping`) |
 | `default`  | none                                          | `off`                                          |
+
+> ACL rule order is load-bearing: the blanket `-@all` must come **before** the `+cmd` grants, or it
+> cancels them and the user can do nothing at all. ACL changes only take effect after a Redis
+> restart.
 
 **Worker sandbox:**
 
@@ -223,7 +335,7 @@ docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 docker logs openclaw-bot     # polling, no errors
 docker logs openclaw-worker  # "Worker started..."
 docker logs openclaw-ml      # "ML worker started (numpy + rules)..." (heartbeat ticks even without data)
-docker logs pca-backend      # nginx on :80
+docker logs pca-backend      # Node http server on :80 (listening + proxying /api/*)
 docker logs node-api         # "Listening on 3000"
 
 # Redis ACLs in effect
@@ -249,11 +361,18 @@ In Telegram:
 |---|---|---|
 | Bot silent in Telegram | `ALLOWED_USER` mismatch | Verify your numeric Telegram user ID (`@userinfobot`) |
 | Worker can't reach gateway | DNS / `outbound_net` blocked / `AI_GATEWAY_API_KEY` rejected | Check `docker logs openclaw-worker` for the error |
+| `host.docker.internal` does not resolve | Docker on Linux needs an explicit host mapping | The compose file sets `extra_hosts: ["host.docker.internal:host-gateway"]`; if you changed it, use `172.17.0.1` or the host LAN IP instead |
+| Gateway returns HTTP 403 | The key is not scoped to the model being requested | Re-mint with `~/ai-gateway/scripts/create-dev-key.sh`; check the key's `models` list matches `AI_GATEWAY_MODEL` |
+| Gateway returns HTTP 400 "Invalid model name" | `AI_GATEWAY_MODEL` names a model the orchestrator does not serve | The orchestrator serves `company-coder` only |
+| Plan output fails to parse | Response truncated at the token cap | Raise `AI_GATEWAY_MAX_TOKENS` (default 8000) |
+| Call times out | Client timeout below the gateway's own upstream timeout | Raise `AI_GATEWAY_TIMEOUT` (default 150) |
 | `git push` rejected | `GITHUB_TOKEN` missing `contents:write`, or not authorized on target repo | Regenerate fine-grained PAT with the right scopes |
 | PR open rejected | Token missing `pull_requests:write`, branch protection blocks the bot, or repo archived | Loosen branch protection for bot branches; check token scopes |
 | Dashboard blank | `openclaw-ml` hasn't run yet, or `node-api` can't reach Redis | Check `REDIS_HOST`/`REDIS_PORT`; `node-api` uses the `nodeapi` user |
+| Dashboard returns 500/502 | `node-api` crashed on a Redis `NOPERM` — usually an ACL key-pattern gap | Check `docker logs node-api` for `NOPERM`; the key it wants must be in the `nodeapi` key patterns |
 | `/chat` returns nothing | `CHAT_HISTORY_MAX_TURNS=0` would break it | Must be ≥ 2 |
-| Redis ACL errors at startup | Password substitution failed in `entrypoint.sh` | Confirm all `REDIS_PASSWORD_*` env vars are set |
+| Redis ACL errors at startup | Password substitution failed in `entrypoint.sh`, or the ACL file still contains `#` comments | Confirm all `REDIS_PASSWORD_*` env vars are set; the entrypoint strips comments before Redis reads the file |
+| Redis container exits immediately | The ACL file contains a line Redis cannot parse | Redis 7 rejects `#` comments in the ACL file; the entrypoint must strip them |
 
 ---
 
@@ -267,6 +386,10 @@ dev_agent-pi5/
 |-- docker-compose.prod.yml            # authoritative: 6 services, zero-trust
 |-- docker-compose.yml                 # dev-only, stale (see AGENTS.md)
 |-- .env.example                       # placeholder env (commit this; .env is gitignored)
+|-- INTEGRATION.md                     # gateway handoff runbook (bot <-> ~/ai-gateway)
+|-- contract/                          # mirror of the external ~/ai-gateway contract
+|   |-- README.md                      # what is canonical, where, and the cutover procedure
+|   '-- endpoints/dev-agent-bot.contract.ts
 |-- install.sh                         # bootstrap (stale; see AGENTS.md)
 |-- core/
 |   |-- bot/                           # TELEGRAM FRONTEND (bot + worker share image)
@@ -299,7 +422,7 @@ dev_agent-pi5/
 |       |-- src/main.tsx
 |       |-- src/App.tsx
 |       |-- src/styles/global.css
-|       |-- nginx.conf
+|       |-- serve.mjs                    # Node http server: static + /api/* proxy + gzip + SPA fallback
 |       '-- ...
 |-- redis/
 |   |-- redis.conf                     # bind, appendonly off, aclfile, dangerous commands renamed
@@ -311,6 +434,7 @@ dev_agent-pi5/
     |   |-- simplify/2026-10-24--strip-llm-and-vdb-keep-bot-pca.md
     |   |-- llm/2026-10-19--replace-local-qwen-with-litellm.md
     |   |-- llm/2026-10-31--litellm-escalate-interpretation.md
+    |   |-- llm/2026-10-31--bot-as-scoped-gateway-consumer-with-contract.md
     |   '-- skills/2026-10-31--adopt-company-skills-set-adapt-for-repo.md
     |-- sessions/                      # AI work history (one file per session)
     |   |-- llm/...
@@ -358,7 +482,7 @@ Implementation status (full plan: `.ai/sessions/llm/2026-10-28-2053--LEAVE-OFF.m
 - ✅ **Phase 1** — Chat/dictation core. `ai_gateway_client.chat()`, `chat_store.py`, `telegram_sender.py`.
 - ✅ **Phase 2** — Git / PR workflow. `github_client.py`, `/build` + `/chat` + `/pr` commands, `queue_worker.py` rewrite.
 - ✅ **Phase 3** — Container wiring + Redis ACLs. `git` in bot image, `/sandbox` tmpfs, per-service Redis ACLs.
-- ✅ **Phase 4** — ML cleanup + dashboard fixes. Keras + TFLite removed; `risk_classifier.py` (rules-based); pca-backend build fixes (main.tsx, index.html, css rename, nginx).
+- ✅ **Phase 4** — ML cleanup + dashboard fixes. Keras + TFLite removed; `risk_classifier.py` (rules-based); pca-backend build fixes (main.tsx, index.html, css rename, node http server replaces nginx).
 - ✅ **Phase 5** — CI/CD. `.github/workflows/{ci,deploy,build-pr}.yml` + `.github/actions/docker-build/action.yml`; write the `lightweight-vertical-to-ai-gateway` decision file. All shipped.
 
 ---

@@ -229,7 +229,7 @@ def process_build_job(job: dict) -> None:
 
     update_job_status(job_id, "running", {"step": "plan"})
     repo_context = _gather_repo_context(SANDBOX_DIR)
-    plan = plan_changes(feature, repo_context)
+    plan = plan_changes(feature, repo_context, session_id=job_id)
     files = plan.get("files", []) if isinstance(plan, dict) else []
 
     if not files:
@@ -306,7 +306,7 @@ def process_chat_job(job: dict) -> None:
     messages = list(history) + [{"role": "user", "content": user_text}]
 
     update_job_status(job_id, "running", {"step": "chat"})
-    response = chat(messages, model=model_override)
+    response = chat(messages, model=model_override, session_id=job_id)
 
     chat_store.append(chat_id, "user", user_text)
     chat_store.append(chat_id, "assistant", response)

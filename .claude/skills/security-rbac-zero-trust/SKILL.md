@@ -74,13 +74,16 @@ The live files:
 
 - `redis/redis.conf` — the server config. `aclfile` points at the generated ACL; dangerous commands (`FLUSHDB`, `FLUSHALL`, `KEYS`, `CONFIG`, `SHUTDOWN`, `DEBUG`) are renamed to empty, so they fail at the protocol level.
 - `redis/users.acl.template` — the source ACL with `${REDIS_PASSWORD_*}` placeholders.
-- `redis/entrypoint.sh` — substitutes the placeholders from container env at boot and writes the real ACL to a tmpfs.
+- `redis/entrypoint.sh` — substitutes the placeholders from container env at boot and writes the real ACL to a tmpfs. It also strips `#` comment lines and blank lines: Redis 7 rejects comments in an ACL file and refuses to start on one.
 
 Rules:
 
 - **One user per service.** `bot`, `worker`, `ml`, `nodeapi`. Never share one user between two services: sharing a user means sharing its key patterns, which is how a read-only service ends up able to write.
-- **Key patterns follow the data flow.** A service may only touch the keys it produces or consumes. `ml` writes `pca:*`, `drift:*`, `risk:*`, `model:*`, `ml:*`. `nodeapi` reads `pca:*`, `drift:*`, `risk:*`, `model:*`, `ml:heartbeat`, `ml:last_run`. `bot` and `worker` share the `chat:*`, `queue:*`, `job:*`, `rate:*`, `worker:*` space because they are one logical pipeline (the bot enqueues, the worker drains).
-- **Read-only services are read-only by command set, not by key pattern alone.** `nodeapi` gets `+get +hget +hgetall +lrange +zrange +zrevrange +exists +type +ttl +scan -@all`. A key-pattern-only ACL still lets a compromised reader run `SET` on a key it is allowed to read.
+- **Key patterns follow the data flow.** A service may only touch the keys it produces or consumes. `ml` writes `pca:*`, `drift:*`, `risk:*`, `model:*`, `ml:*`. `nodeapi` reads `pca:*`, `drift:*`, `risk:*`, `model:*`, `ml:heartbeat`, `ml:last_run`. `bot` and `worker` share the `chat:*`, `queue:*`, `job:*`, `jobs:*`, `rate:*`, `worker:*` space because they are one logical pipeline (the bot enqueues, the worker drains).
+- **Read-only services are read-only by command set, not by key pattern alone.** `nodeapi` gets `-@all +get +lrange +ping` — exactly the commands `core/node-api` calls. A key-pattern-only ACL still lets a compromised reader run `SET` on a key it is allowed to read.
+- **Rule order is load-bearing.** Redis applies ACL rules in order, so the blanket `-@all` must come **before** the `+cmd` grants. A trailing `-@all` cancels every earlier grant and the user can do nothing.
+- **An ACL change is not done until it is exercised against a live Redis.** Compare the code's literal key names and Redis calls against the template, then run each service's own commands with that service's own credentials — including one operation the service must be denied. Reading the template does not prove the boundary holds.
+- **ACL changes require a Redis restart.** The ACL file is read at startup; an in-place template edit changes nothing until the container is recreated.
 - **Every service passes its own `REDIS_USER` and password.** The clients authenticate with `username=` explicitly — `core/bot/bot.py`, `core/bot/queue_worker.py`, `core/bot/chat_store.py`, `core/ml/redis_store.py`, and `core/node-api/src/redis/client.ts`.
 - **Passwords come from env only.** They are never written into the template, the compose file, or any `.ai/` memory file. The template holds `${REDIS_PASSWORD_*}` placeholders; `entrypoint.sh` substitutes them at boot.
 - **The substituted ACL does not persist.** It lives on a tmpfs inside the redis container, so a restart regenerates it from env rather than reading a stale file with old passwords.
@@ -96,7 +99,7 @@ When reviewing a change for security posture, walk this list:
 - **RBAC:** new bot command passes the `ALLOWED_USER` gate and the rate limiter before doing work; new endpoint declares the permission it requires; the check runs before any read/write; failure is logged.
 - **Zero trust:** input passes hand-written validation before use; a path that comes from the gateway is normalized and proven to stay inside the sandbox; error responses carry stable codes, not stack detail.
 - **No frontend keys:** no secret-looking string in `core/pca-backend/src/**` or any code that builds the bundle. Frontend env files contain only public values. Grep the built `dist/`.
-- **Redis ACLs:** a service that gained Redis access has its own ACL user with the narrowest key patterns and command set that works; `nodeapi` stays read-only; `default` stays `off`; no password literal in the template, the compose file, or `.ai/`.
+- **Redis ACLs:** a service that gained Redis access has its own ACL user with the narrowest key patterns and command set that works; `nodeapi` stays read-only; `default` stays `off`; no password literal in the template, the compose file, or `.ai/`. The template was diffed against the code's actual key names and every service's ACL was exercised against a live Redis, including a denied operation.
 - **Container posture:** `read_only: true` retained, `cap_drop: ALL` retained, `no-new-privileges` retained, tmpfs mounts limited to the writable surfaces the service actually needs.
 - **Logging:** auth failures and permission denials are logged; no tokens, passwords, or gateway keys are logged.
 - **Secrets:** any secret read from env is consumed server-side only; rotation is documented; raw values are never written to `.ai/` (see `pii-redaction`).

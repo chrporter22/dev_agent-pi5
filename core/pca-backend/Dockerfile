@@ -1,7 +1,9 @@
 # ------------------------------------
-# Build Stage
+# PCA BACKEND — core/pca-backend/Dockerfile
+# Build the React bundle with Vite, then serve dist/ + proxy /api/*
+# to node-api with a small Node http server. No nginx.
 # ------------------------------------
-FROM node:22-alpine AS builder
+FROM node:22-alpine
 
 WORKDIR /app
 
@@ -13,17 +15,9 @@ COPY . .
 
 RUN npm run build
 
-# ------------------------------------
-# Runtime Stage
-# ------------------------------------
-FROM nginx:1.27-alpine
-
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-
-COPY --from=builder \
-  /app/dist \
-  /usr/share/nginx/html
+ENV NODE_API_URL=http://node-api:3000
+ENV PORT=80
 
 EXPOSE 80
 
-CMD ["nginx", "-g", "daemon off;"]
+CMD ["node", "serve.mjs"]

@@ -95,7 +95,7 @@ Every service has:
 |----------------------------|--------------------------------------------------------------------------------------|
 | `bot.py`                   | Telegram polling, command dispatch, RBAC, rate limit, job queuing.                   |
 | `queue_worker.py`          | Worker main loop; branches on `job_type` for build vs chat.                          |
-| `ai_gateway_client.py`     | `parse_instruction` (legacy planner), `chat` (free text), `plan_changes` (build JSON). Shared retry helper. |
+| `ai_gateway_client.py`     | `parse_instruction` (legacy planner), `chat` (free text), `plan_changes` (build JSON). Handles null-content, truncation, non-5xx errors fast, session-id correlation. |
 | `chat_store.py`            | Redis wrapper for `chat:{chat_id}:history` (LIST, trim to N) and `chat:{chat_id}:model` (STRING). |
 | `telegram_sender.py`       | `_chunk_send(chat_id, text)` — splits on `\n\n` boundaries, ≤ `TELEGRAM_MAX_CHARS` per message. |
 | `github_client.py`         | `clone_or_pull`, `create_branch`, `commit_all`, `push`, `open_pr`, `list_prs`, `get_pr`, `merge_pr`. Git CLI + REST API. |
@@ -219,7 +219,7 @@ Anything else returns the help menu.
 4. **Status** — Mark job `running` in Redis (`jobs:running` zset).
 5. **Sandbox** — `github_client.clone_or_pull(repo, SANDBOX_DIR)`. Idempotent — pulls if exists.
 6. **Branch** — `github_client.create_branch(SANDBOX_DIR, "dev-agent/<job-id-prefix>")`.
-7. **Plan** — `ai_gateway_client.plan_changes(instruction, repo_context)` — returns `{files: [{path, action, content}]}`.
+7. **Plan** — `ai_gateway_client.plan_changes(instruction, repo_context, session_id=job_id)` — returns `{files: [{path, action, content}]}`. Sends `response_format: json_object` + `max_tokens`.
 8. **Apply** — Write/modify/delete files in the sandbox. Path-traversal guarded: reject `..`, absolute paths, or paths that resolve outside `SANDBOX_DIR`.
 9. **Commit** — `github_client.commit_all(SANDBOX_DIR, message)`. Returns `False` if no changes — worker marks complete and skips push.
 10. **Push** — `github_client.push(SANDBOX_DIR, branch_name)`.
@@ -237,7 +237,7 @@ On any git/gateway failure: send error to Telegram, mark job `failed`. No retry 
 2. **Enqueue** — Push `{id, chat_id, type: "chat", instruction, ts}` to Redis.
 3. **Dequeue** — Worker `brpoplpush`.
 4. **History** — `ChatStore.history(chat_id)` → last 20 turns (`[{role, content, ts}, ...]`).
-5. **Chat** — `ai_gateway_client.chat(messages, system_prompt, model=...)` — `/v1/chat/completions` with the conversation, no `response_format`. Model comes from per-chat override or `AI_GATEWAY_MODEL`.
+5. **Chat** — `ai_gateway_client.chat(messages, system_prompt, model=..., session_id=job_id)` — `/v1/chat/completions` with the conversation, no `response_format`. Model comes from per-chat override or `AI_GATEWAY_MODEL`, and must be in `AI_GATEWAY_ALLOWED_MODELS`.
 6. **Persist** — Append user turn + assistant turn via `ChatStore.append`. List is trimmed to `CHAT_HISTORY_MAX_TURNS`.
 7. **Reply** — `_chunk_send(chat_id, response_text)` — splits on `\n\n` boundaries, ≤ `TELEGRAM_MAX_CHARS` per message.
 8. **Cleanup** — Mark job `complete`.
@@ -358,9 +358,12 @@ Required:
 | `REDIS_PASSWORD_WORKER` | Per-service Redis password for the `worker` user |
 | `REDIS_PASSWORD_ML` | Per-service Redis password for the `ml` user |
 | `REDIS_PASSWORD_NODEAPI` | Per-service Redis password for the `nodeapi` user |
-| `AI_GATEWAY_BASE_URL` | Base URL of the user-owned gateway |
-| `AI_GATEWAY_API_KEY` | Bearer token for the gateway |
-| `AI_GATEWAY_MODEL` | Default model name (overridable per chat via `/model`) |
+| `AI_GATEWAY_BASE_URL` | Base URL of the user-owned gateway. **Must be the orchestrator on port 4001**, not LiteLLM on 4000. |
+| `AI_GATEWAY_API_KEY` | Scoped virtual key for the gateway (scoped to `AI_GATEWAY_MODEL`, bounded by budget). Obtain via `~/ai-gateway/scripts/create-dev-key.sh`. |
+| `AI_GATEWAY_MODEL` | Default model name. The orchestrator exposes exactly `company-coder`; this repo's default matches it. Overridable per chat via `/model` but must be in `AI_GATEWAY_ALLOWED_MODELS`. |
+| `AI_GATEWAY_TIMEOUT` | Per-request HTTP timeout in seconds. Default `150`. Must exceed the longest observed call latency. |
+| `AI_GATEWAY_MAX_TOKENS` | Maximum tokens requested per call. Default `8000`. Raising this prevents truncation on structured responses (without it the routing tier cap truncates plan output). |
+| `AI_GATEWAY_ALLOWED_MODELS` | Comma-separated list of model names accepted by `/model`. Default `company-coder`. Requests to any other model fail fast with HTTP 403. |
 | `GITHUB_TOKEN` | Fine-grained PAT with `contents:write` + `pull_requests:write` on target repos |
 
 Optional:
@@ -449,6 +452,7 @@ Project-level decisions (full text under `.ai/decisions/`):
 - `simplify/2026-10-24--strip-llm-and-vdb-keep-bot-pca.md` — removed `core/llm` + `core/vdb`; rewired the bot to `~/ai-gateway`.
 - `llm/2026-10-19--replace-local-qwen-with-litellm.md` — the LiteLLM gateway decision (the *why* behind the external gateway).
 - `llm/2026-10-31--litellm-escalate-interpretation.md` — `LITELLM ESCALATE` / `LITELLM COMPACT` / `LITELLM EXECUTE` are project-internal labels confirming LiteLLM is the gateway tech. Not overrides of plan-first, not new features, not separate modes.
+- `llm/2026-10-31--bot-as-scoped-gateway-consumer-with-contract.md` — the bot connects to the gateway's orchestrator (`:4001`) as a scoped, budgeted consumer; the interface is a TypeScript contract whose canonical copy lives in the gateway repo. Supersedes the no-contract, direct-LiteLLM, master-key parts of `llm/2026-10-31--lightweight-vertical-to-ai-gateway.md`.
 - `skills/2026-10-31--adopt-company-skills-set-adapt-for-repo.md` — the agent skill set adopted from `~/agent-rules/repo-template` and adapted for this repo's stack.
 
 Session history (under `.ai/sessions/`) records the work done in each session.
@@ -462,7 +466,8 @@ Session history (under `.ai/sessions/`) records the work done in each session.
 - **`/pr`** — Bot commands for listing, viewing, and merging bot-created PRs.
 - **`ALLOWED_USER`** — The numeric Telegram user ID authorized to issue commands to the bot.
 - **`ALLOWED_USER` gate** — The RBAC check at the top of every command dispatch path.
-- **`AI_GATEWAY_BASE_URL`** — The base URL of the user-owned `~/ai-gateway` (LiteLLM) endpoint.
+- **`AI_GATEWAY_BASE_URL`** — The base URL of the user-owned `~/ai-gateway` orchestrator endpoint. Port 4001, not the LiteLLM port.
+- **`AI_GATEWAY_ALLOWED_MODELS`** — The model names `/model` accepts. The orchestrator exposes exactly `company-coder`.
 - **`dev-agent/<job-id-prefix>`** — Branch naming convention for bot-created PRs. The bot never writes to `main`.
 - **`LITELLM ESCALATE` / `LITELLM COMPACT` / `LITELLM EXECUTE`** — Project-internal labels confirming the gateway tech (LiteLLM). Not overrides.
 - **Plan changes** — The structured `{files: [{path, action, content}]}` response from `~/ai-gateway` to a `/build` instruction.

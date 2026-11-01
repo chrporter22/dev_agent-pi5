@@ -129,7 +129,7 @@ DEV AGENT Pi — a zero-trust, fully containerized Telegram coding-task interfac
 - **No MongoDB.** All persistence is in Redis (job queue + PCA/ML state). There is no SQL database.
 - **No zod.** Validation is hand-written per service.
 - **Not TypeScript everywhere.** `core/bot` and `core/ml` are Python. `core/node-api` and `core/pca-backend` are TypeScript.
-- **No `contract/` folder.** `core/pca-backend` consumes `core/node-api` over HTTP through the nginx `/api/` proxy. There is no shared contract package, and `core/node-api` is strictly read-only over ML state: it must never compute PCA, retrain, or write ML keys.
+- **No internal `contract/` folder.** `core/pca-backend` consumes `core/node-api` over HTTP through a small Node http proxy at `/api/`. There is no shared contract package, and `core/node-api` is strictly read-only over ML state: it must never compute PCA, retrain, or write ML keys. The repo root `contract/` folder mirrors the **external** `~/ai-gateway` contract only (see `contract/README.md`); it is not an internal service-to-service contract.
 - **No `modules/<feature>/actions/` layout.** Services are organized by concern inside the service directory.
 - **Soft delete, multi-tenancy, and Firebase Auth do not apply.** There is no multi-tenant SaaS layer and no Firebase. The only auth is a Telegram bot token in env.
 
@@ -138,7 +138,7 @@ DEV AGENT Pi — a zero-trust, fully containerized Telegram coding-task interfac
 - `core/bot` — `openclaw-bot` + `openclaw-worker`. Telegram polling, LLM command parsing, Redis job queue, calls external ai-gateway. Never touches the host, the shell, or `main`.
 - `core/ml` — `openclaw-ml`. Background analytics loop with no HTTP API and no exposed ports. Embedding ingest → PCA (pure numpy, top 5 components) → drift detection → rules-based risk classification. Writes every output to Redis (`pca:*`, `drift:*`, `risk:latest`, `model:*`, `ml:heartbeat`, `ml:last_run`). Keras + TFLite removed (Phase 4, 2026-10-31).
 - `core/node-api` — Express/TypeScript read-only ML layer on 3000, endpoints under `/api/ml/`.
-- `core/pca-backend` — React + Vite + Recharts + Tailwind dashboard served by nginx. **The only public ingress (80:80).**
+- `core/pca-backend` — React + Vite + Recharts + Tailwind dashboard served by a small Node http server (`core/pca-backend/serve.mjs`). **The only public ingress (80:80).** No nginx — the Node server handles static files, gzip, SPA fallback, and the `/api/*` reverse proxy itself, with no new npm dependencies.
 
 ## Stack and style
 
@@ -164,6 +164,13 @@ DEV AGENT Pi — a zero-trust, fully containerized Telegram coding-task interfac
 - Every service runs `read_only: true` with tmpfs, `cap_drop: ALL`, and `no-new-privileges`. Keep it that way.
 - Secrets come from env only. The template is the root `.env.example`; `.env` itself is gitignored.
 
+## Redis ACLs
+
+- The ACL file is generated at container start from `redis/users.acl.template` by `redis/entrypoint.sh`, which substitutes the per-service passwords and strips `#` comment lines. **Redis 7 rejects `#` comments in an ACL file** and refuses to start on one.
+- **Rule order is load-bearing.** The blanket `-@all` must come *before* the `+cmd` grants. A trailing `-@all` cancels every earlier grant and the user can do nothing.
+- ACL changes only take effect after a Redis restart. Verify with each service's own credentials, not by reading the template.
+- `nodeapi` is read-only by **command set** (`+get +lrange +ping`), not just by key pattern. Keep it that way.
+
 ## Known-broken, pre-existing
 
 These are already broken on `main`. Do not re-diagnose them mid-task and do not bundle unrelated fixes into a change. Fix one only when the task calls for it, and say so in the plan.
@@ -178,6 +185,13 @@ Fixed by Phase 3 + Phase 4 (2026-10-31) and no longer on this list:
 - ~~`core/node-api/src/redis/client.ts` reads `REDIS_URL`~~ — switched to `REDIS_HOST`/`REDIS_PORT`/`REDIS_USER`/`REDIS_PASSWORD`.
 - ~~`pca-backend/nginx.conf` trailing slash on `proxy_pass http://node-api:3000/;`~~ — fixed.
 - ~~`core/ml/embedding_client.py` calls vdb~~ — file removed; loop is now dormant by design until a new source is wired.
+
+Fixed 2026-10-31 during the ai-gateway integration:
+
+- ~~Redis refused to start — the ACL template's `#` comment header is not valid ACL syntax~~ — the entrypoint now strips comment and blank lines.
+- ~~The `nodeapi` ACL denied every command it was meant to allow — a trailing `-@all` cancelled the earlier `+cmd` grants~~ — deny now precedes the grants.
+- ~~ACL key patterns missed `jobs:index`, `jobs:running`, `jobs:complete`, and `model:*`~~ — patterns extended; `nodeapi` command set narrowed to `+get +lrange +ping`.
+- ~~`pca-backend` crash-looped: the nginx entrypoint's `chown` failed under `cap_drop: ALL`~~ — container now runs as uid 101 with writable tmpfs cache.
 
 ## Memory notes for this project
 
