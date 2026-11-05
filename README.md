@@ -76,7 +76,11 @@ docker compose -f docker-compose.prod.yml ps   # all Up; redis + worker Healthy
 curl http://localhost/api/ml/pca/summary        # 200, JSON
 ```
 
-In Telegram, message your bot and send `/status`. The bot should reply with the queue + worker state. Send `/help` for the full command list.
+In Telegram, message your bot and send:
+
+- `/status` — should reply with the queue + worker state.
+- `/help` — should print the full command table.
+- `/chat hello` — exercises the full path (Telegram → bot → Redis → worker → gateway → reply). If this works, the gateway wiring is good end to end.
 
 ### 6. (Later) Mint a fresh gateway key
 
