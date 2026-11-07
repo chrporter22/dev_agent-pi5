@@ -31,6 +31,18 @@ RISK_CLASSES = ["Low", "Medium", "High", "Critical"]
 ML_WORKER_SLEEP = int(os.getenv("ML_WORKER_SLEEP", "5"))
 
 # --------------------------------------------------
+# DATA SOURCE
+# --------------------------------------------------
+# synthetic: seeded deterministic stream; dashboard renders out of the box.
+# none:      pipeline idle, only the heartbeat ticks (pre-2026-11-07 default).
+# A future value (e.g. gateway) can be added without changing the loop.
+ML_DATA_SOURCE = os.getenv("ML_DATA_SOURCE", "synthetic")
+
+# Synthetic stream shape. PCA needs >= 2 samples and >= 2 features.
+ML_SYNTHETIC_SAMPLES = int(os.getenv("ML_SYNTHETIC_SAMPLES", "64"))
+ML_SYNTHETIC_DIM = int(os.getenv("ML_SYNTHETIC_DIM", "128"))
+
+# --------------------------------------------------
 # LOGGING
 # --------------------------------------------------
 ML_LOG_LEVEL = os.getenv("ML_LOG_LEVEL", "INFO")

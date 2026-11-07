@@ -40,26 +40,30 @@ The bot only responds to one Telegram account (`ALLOWED_USER`). You need the num
 - Message [@userinfobot](https://t.me/userinfobot). It replies with a `Id:` line. That number is yours.
 - Or run this once against the bot token (replace `<TOKEN>`): `curl -s "https://api.telegram.org/bot<TOKEN>/getMe" | jq .result.id` (that gives the bot id, not yours — use the userinfobot).
 
-### 3. Fill `.env`
+### 3. Fill `.env` (the three values that make it go live)
 
-A `.env` file already ships pre-populated with random Redis passwords and a scoped gateway key. Edit only the Telegram values:
+A `.env` file already ships pre-populated with random Redis passwords and a scoped gateway key. You only need to set three values to take the bot live:
 
 ```bash
-TELEGRAM_TOKEN=<paste from BotFather>
-ALLOWED_USER=<your numeric user id>
+TELEGRAM_TOKEN=<paste from BotFather>          # step 1
+ALLOWED_USER=<your numeric user id>            # step 2 — 0 rejects every command
+DEFAULT_REPO=<owner/repo>                      # optional but saves typing on /build
 ```
+
+Until `TELEGRAM_TOKEN` is a real BotFather token, the bot container logs
+`Connection reset by peer` on every poll — that is expected and harmless.
+A real token changes that to continuous `getUpdates` success.
 
 If you cloned the repo fresh and `.env` is missing:
 
 ```bash
 cp .env.example .env
-# then edit the two lines above; everything else is fine for a first run
+# then set the three values above; everything else is fine for a first run
 ```
 
 Optional:
 
 - `GITHUB_TOKEN` — only needed for `/build` to open a PR. Fine-grained PAT, scopes `contents:write` and `pull_requests:write` on the target repos.
-- `DEFAULT_REPO` — only needed if you want `/build <feature>` (no `owner/repo` prefix) to default somewhere.
 
 ### 4. Start the stack
 
@@ -73,10 +77,21 @@ Six containers come up; `pca-backend` is the only one that publishes a port (80)
 
 ```bash
 docker compose -f docker-compose.prod.yml ps   # all Up; redis + worker Healthy
-curl http://localhost/api/ml/pca/summary        # 200, JSON
+curl http://localhost/api/ml/pca/summary        # 200, non-null projection/variance/...
 ```
 
-In Telegram, message your bot and send:
+The ML dashboard at `http://<pi>/` should render PCA, drift, and risk cards
+with real numbers — even before you set a Telegram token. The synthetic data
+source is seeded deterministically and runs on every ML worker cycle.
+
+When `TELEGRAM_TOKEN` and `ALLOWED_USER` are set, confirm the bot is polling:
+
+```bash
+docker compose -f docker-compose.prod.yml logs openclaw-bot --tail 5
+# Look for:    "getUpdates" success — not "Connection reset by peer"
+```
+
+Then in Telegram, message your bot and send:
 
 - `/status` — should reply with the queue + worker state.
 - `/help` — should print the full command table.

@@ -3,6 +3,8 @@
 import json
 import time
 
+import numpy as np
+
 from pca_engine import compute_pca
 from drift_detector import compute_drift
 from risk_classifier import classify_risk
@@ -12,7 +14,12 @@ from redis_store import (
     store_value
 )
 
-from config import ML_WORKER_SLEEP
+from config import (
+    ML_DATA_SOURCE,
+    ML_SYNTHETIC_DIM,
+    ML_SYNTHETIC_SAMPLES,
+    ML_WORKER_SLEEP
+)
 
 
 # --------------------------------------------------
@@ -44,12 +51,76 @@ def _heartbeat():
     store_value("ml:last_run", now)
 
 
-def _load_embeddings():
-    """Data source is currently unwired (the vdb source was removed along
-    with `core/vdb` in the 2026-10-24 simplify). When a source is wired,
-    replace this stub with the actual fetch.
-    """
+# --------------------------------------------------
+# SYNTHETIC DATA SOURCE (development / bring-up)
+# --------------------------------------------------
 
+_SYNTHETIC_BASE_SEED = 42
+_SYNTHETIC_LATENT_DIMS = 3
+_SYNTHETIC_NOISE_STD = 0.1
+_SYNTHETIC_DRIFT_AMPLITUDE = 0.5
+_SYNTHETIC_DRIFT_PERIOD = 30
+
+_cycle_counter = 0
+
+
+def _load_synthetic_embeddings():
+    """Persistent-RNG seeded stream for development.
+
+    A fixed random projection matrix W is generated once.  Each cycle draws
+    fresh latent values with a sinusoidal drift on the centroid, so the
+    drift score oscillates smoothly instead of jumping.  RNG state is
+    preserved across calls, so the draws evolve naturally cycle to cycle.
+    """
+    global _cycle_counter
+    global _synthetic_rng
+    global _synthetic_projection
+
+    _cycle_counter += 1
+
+    n = ML_SYNTHETIC_SAMPLES
+    d = ML_SYNTHETIC_DIM
+
+    # Lazy init: fixed projection matrix, persistent RNG
+    if _cycle_counter == 1:
+        _synthetic_rng = np.random.default_rng(_SYNTHETIC_BASE_SEED)
+        _synthetic_projection = _synthetic_rng.standard_normal(
+            (_SYNTHETIC_LATENT_DIMS, d)
+        )
+
+    rng = _synthetic_rng
+
+    # Low-rank latent
+    z = rng.standard_normal((n, _SYNTHETIC_LATENT_DIMS))
+
+    # Sinusoidal drift on the latent centroid
+    phase = 2.0 * np.pi * _cycle_counter / _SYNTHETIC_DRIFT_PERIOD
+    z += _SYNTHETIC_DRIFT_AMPLITUDE * np.sin(phase)
+
+    noise = rng.normal(0.0, _SYNTHETIC_NOISE_STD, (n, d))
+
+    x = z @ _synthetic_projection + noise
+    # Centre each batch so centroid drift is the only signal
+    x -= x.mean(axis=0, keepdims=True)
+
+    return x.astype(np.float32).tolist()
+
+
+_synthetic_rng = None
+_synthetic_projection = None
+
+
+# --------------------------------------------------
+# SOURCE DISPATCH
+# --------------------------------------------------
+
+def _load_embeddings():
+    source = ML_DATA_SOURCE
+
+    if source == "synthetic":
+        return _load_synthetic_embeddings()
+
+    # "none" — keep the original postsimplify behaviour
     return None
 
 
