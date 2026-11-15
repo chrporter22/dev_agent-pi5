@@ -8,8 +8,8 @@ session's fixes:
    `Gateway returned HTTP 403: model 'coder-complex' is not available
    for this API key`. Root cause: `.env` had `AI_GATEWAY_MODEL=coder-complex`,
    which the API key wasn't authorised for.
-2. `openclaw-bot` was logging `Polling error: … /bot9222980295:AAHH…
-   /getUpdates …` — the `requests` library embeds the full URL (with
+2. `openclaw-bot` was logging `Polling error: … /bot<REDACTED:TOKEN>/
+   getUpdates …` — the `requests` library embeds the full URL (with
    the Telegram bot token) in `RequestException` messages, and the
    polling loop logged those messages verbatim.
 
@@ -132,6 +132,11 @@ git commit -m "Dynamic AI gateway model via /v1/models discovery + redact TELEGR
   `/build` should succeed with `company-coder` from discovery.
   Cleaning the stale line out of `.env` is recommended for hygiene
   but not blocking.
+  > **Updated later the same day:** the user commented `AI_GATEWAY_MODEL`
+  > out of `.env` entirely and asked that it stay that way — this repo is
+  > a thin shell and the gateway owns model routing. `.env.example` was
+  > updated to match (also commented out). The fallback path still works
+  > because `config.py:14` defaults `AI_GATEWAY_MODEL` to `company-coder`.
 - **`_MODEL_CACHE` is process-local and per-worker.** Each container
   (bot and worker) does its own discovery. Discovery results are
   consistent because the whitelist intersection is deterministic.
@@ -142,6 +147,10 @@ git commit -m "Dynamic AI gateway model via /v1/models discovery + redact TELEGR
   poll cycle — it logs once per exception and the URL is redacted —
   but the underlying DNS issue must be fixed for `/chat` to work.
   Out of scope for this change.
+  > **Resolved later the same day:** the DNS failure was transient, not a
+  > config fault. `nslookup api.telegram.org` inside the container
+  > resolves, `ping` succeeds at 0% loss, and `GET /getMe` returns
+  > HTTP 200. The bot polls silently and needs no change.
 - **The redaction helper only covers `TELEGRAM_TOKEN` and `GITHUB_TOKEN`.**
   `AI_GATEWAY_API_KEY` and `REDIS_PASSWORD` would also leak if a
   `requests` call to those endpoints raised with the URL in the

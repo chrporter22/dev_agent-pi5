@@ -169,6 +169,21 @@ removed:
   chars**, so the actual offending offset (e.g. char 4984) is not visible
   in the log. Reproducing with a targeted probe prompt is what made this
   diagnosable.
+- **The container was already rebuilt during this session.** The worker
+  was rebuilt with `docker compose -f docker-compose.prod.yml up -d
+  --build openclaw-worker` before the verification runs, so the running
+  container has the fix. A first test attempt appeared to fail only
+  because it ran against the stale pre-rebuild container. Confirm the
+  live code with:
+  `docker exec openclaw-worker python -c "from ai_gateway_client import
+  _safe_parse_json; print(_safe_parse_json('{\"c\": \"a\\\\ b\"}'))"`
+  — expected `{'c': 'a\\ b'}`; an `Invalid \escape` raise means stale code.
+- **`pca-backend` reports `unhealthy` — pre-existing and unrelated.** Its
+  healthcheck probes `http://localhost/` (port 80) while `serve.mjs`
+  listens on 8888. The service itself is fine: `/` and
+  `/api/ml/pca/summary` both return HTTP 200 from the host. No
+  `pca-backend` file was touched in this session, and per the repo rules
+  this known-broken item should not be bundled into an unrelated change.
 
 ## On LITELLM COMPACT / LITELLM ESCALATE
 
