@@ -16,8 +16,8 @@ COPY . .
 RUN npm run build
 
 ENV NODE_API_URL=http://node-api:3000
-ENV PORT=80
+ENV PORT=8888
 
-EXPOSE 80
+EXPOSE 8888
 
 CMD ["node", "serve.mjs"]

@@ -11,7 +11,7 @@ import { extname, join, normalize, resolve } from "node:path"
 import { pipeline } from "node:stream/promises"
 import { createGzip, constants as zlibConstants } from "node:zlib"
 
-const PORT = parseInt(process.env.PORT || "80", 10)
+const PORT = parseInt(process.env.PORT || "8888", 10)
 const UPSTREAM = process.env.NODE_API_URL || "http://node-api:3000"
 const DIST_DIR = resolve(process.cwd(), "dist")
 
@@ -77,16 +77,23 @@ async function sendStatic(req, res, filePath, acceptEncoding) {
   const compress = COMPRESSIBLE.has(type.split(";")[0]) &&
                    acceptEncoding && acceptEncoding.includes("gzip")
 
-  res.writeHead(200, {
+  const headers = {
     "Content-Type": type,
     "Cache-Control": ext === ".html" ? "no-cache" : "public, max-age=3600",
     "Vary": "Accept-Encoding",
     "X-Content-Type-Options": "nosniff"
-  })
+  }
+
+  if (compress) {
+    headers["Content-Encoding"] = "gzip"
+  } else {
+    headers["Content-Length"] = stat.size
+  }
+
+  res.writeHead(200, headers)
 
   try {
     if (compress) {
-      res.setHeader("Content-Encoding", "gzip")
       await pipeline(createReadStream(filePath), createGzip({
         level: zlibConstants.Z_BEST_SPEED
       }), res)
@@ -102,14 +109,19 @@ async function sendStatic(req, res, filePath, acceptEncoding) {
 async function sendIndex(res, acceptEncoding) {
   const stat = statSync(INDEX_FALLBACK)
   const compress = acceptEncoding && acceptEncoding.includes("gzip")
-  res.writeHead(200, {
+  const headers = {
     "Content-Type": MIME[".html"],
     "Cache-Control": "no-cache",
     "Vary": "Accept-Encoding",
     "X-Content-Type-Options": "nosniff"
-  })
+  }
   if (compress) {
-    res.setHeader("Content-Encoding", "gzip")
+    headers["Content-Encoding"] = "gzip"
+  } else {
+    headers["Content-Length"] = stat.size
+  }
+  res.writeHead(200, headers)
+  if (compress) {
     return pipeline(createReadStream(INDEX_FALLBACK), createGzip(), res)
   }
   return pipeline(createReadStream(INDEX_FALLBACK), res)

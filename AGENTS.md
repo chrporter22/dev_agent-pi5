@@ -138,7 +138,7 @@ DEV AGENT Pi — a zero-trust, fully containerized Telegram coding-task interfac
 - `core/bot` — `openclaw-bot` + `openclaw-worker`. Telegram polling, LLM command parsing, Redis job queue, calls external ai-gateway. Never touches the host, the shell, or `main`.
 - `core/ml` — `openclaw-ml`. Background analytics loop with no HTTP API and no exposed ports. Embedding ingest → PCA (pure numpy, top 5 components) → drift detection → rules-based risk classification. Writes every output to Redis (`pca:*`, `drift:*`, `risk:latest`, `model:*`, `ml:heartbeat`, `ml:last_run`). Keras + TFLite removed (Phase 4, 2026-10-31).
 - `core/node-api` — Express/TypeScript read-only ML layer on 3000, endpoints under `/api/ml/`.
-- `core/pca-backend` — React + Vite + Recharts + Tailwind dashboard served by a small Node http server (`core/pca-backend/serve.mjs`). **The only public ingress (80:80).** No nginx — the Node server handles static files, gzip, SPA fallback, and the `/api/*` reverse proxy itself, with no new npm dependencies.
+- `core/pca-backend` — React + Vite + Recharts + Tailwind dashboard served by a small Node http server (`core/pca-backend/serve.mjs`). **The only public ingress (8888:8888).** No nginx — the Node server handles static files, gzip, SPA fallback, and the `/api/*` reverse proxy itself, with no new npm dependencies.
 
 ## Stack and style
 

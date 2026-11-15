@@ -17,7 +17,7 @@ openclaw-worker
    '-- /chat:   call ~/ai-gateway chat -> reply
 
 Analytics chain (dormant until a data source is wired):
-openclaw-ml (PCA, drift, rules-based risk) -> Redis -> node-api -> pca-backend (Node http server :80)
+openclaw-ml (PCA, drift, rules-based risk) -> Redis -> node-api -> pca-backend (Node http server :8888)
 ```
 
 ---
@@ -71,7 +71,7 @@ Optional:
 docker compose -f docker-compose.prod.yml up -d --build
 ```
 
-Six containers come up; `pca-backend` is the only one that publishes a port (80). Open `http://<pi>/` to see the dashboard.
+Six containers come up; `pca-backend` is the only one that publishes a port (8888). Open `http://<pi>:8888/` to see the dashboard.
 
 ### 5. Verify
 
@@ -170,7 +170,7 @@ Six containers. Internal network is closed. Only `pca-backend` publishes a port.
 | `openclaw-worker`  | Queue consumer; `/build` = git + gateway + PR; `/chat` = gateway | internal + outbound | `worker`   |
 | `openclaw-ml`      | Background analytics: PCA (numpy), drift, rules-based risk       | internal            | `ml`       |
 | `node-api`         | Read-only Express layer serving ML Redis state                    | internal            | `nodeapi`  |
-| `pca-backend`      | React + Tailwind dashboard behind nginx                           | internal + outbound (only public port :80) | none       |
+| `pca-backend`      | React + Tailwind dashboard behind Node http server                | internal + outbound (only public port :8888) | none       |
 
 `openclaw-ml` runs pure-numpy PCA and statistical drift detection. **No neural network.** No model weights loaded by any service.
 
@@ -299,7 +299,7 @@ This is a zero-trust, fully containerized stack. Each layer enforces access on i
 - `cap_drop: ALL`, `security_opt: no-new-privileges: true`.
 - Non-root users (`botuser`, `mluser`, `nginx`).
 - `pids_limit` and `mem_limit` per service.
-- Internal network (`internal: true`); only `pca-backend` exposes `:80`.
+- Internal network (`internal: true`); only `pca-backend` exposes `:8888`.
 - No docker.sock, no host mounts, no privileged flags.
 
 **Secrets handling:**
@@ -354,7 +354,7 @@ docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 docker logs openclaw-bot     # polling, no errors
 docker logs openclaw-worker  # "Worker started..."
 docker logs openclaw-ml      # "ML worker started (numpy + rules)..." (heartbeat ticks even without data)
-docker logs pca-backend      # Node http server on :80 (listening + proxying /api/*)
+docker logs pca-backend      # Node http server on :8888 (listening + proxying /api/*)
 docker logs node-api         # "Listening on 3000"
 
 # Redis ACLs in effect
