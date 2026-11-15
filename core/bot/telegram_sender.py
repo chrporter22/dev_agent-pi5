@@ -17,11 +17,22 @@ BASE = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 # ----------------------------------
 # PRIVATE HELPERS
 # ----------------------------------
+def _sanitize_for_log(msg: str) -> str:
+    """Strip TELEGRAM_TOKEN from any error message that may include the full URL."""
+    if TELEGRAM_TOKEN and isinstance(msg, str):
+        return msg.replace(TELEGRAM_TOKEN, "<REDACTED:TOKEN>")
+    return msg
+
+
 def _send(chat_id, text: str) -> None:
-    requests.post(
-        f"{BASE}/sendMessage",
-        json={"chat_id": chat_id, "text": text}
-    )
+    try:
+        requests.post(
+            f"{BASE}/sendMessage",
+            json={"chat_id": chat_id, "text": text},
+            timeout=10
+        )
+    except requests.RequestException as e:
+        print(f"Failed to send Telegram: {_sanitize_for_log(str(e))}")
 
 
 def _hard_split(block: str, limit: int) -> List[str]:

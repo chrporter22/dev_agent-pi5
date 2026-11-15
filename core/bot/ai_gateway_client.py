@@ -6,6 +6,7 @@ from typing import Any, Callable, Dict, List, Optional
 import requests
 
 from config import (
+    AI_GATEWAY_ALLOWED_MODELS,
     AI_GATEWAY_API_KEY,
     AI_GATEWAY_BASE_URL,
     AI_GATEWAY_MAX_TOKENS,
@@ -27,7 +28,52 @@ MAX_RETRIES = 3
 BACKOFF_BASE = 0.5
 
 GATEWAY_CHAT_PATH = "/v1/chat/completions"
+GATEWAY_MODELS_PATH = "/v1/models"
 SESSION_HEADER = "x-session-id"
+
+_MODEL_CACHE: Dict[str, Any] = {"model": None, "fetched_at": 0.0}
+_MODEL_CACHE_TTL = 3600
+
+
+def _discover_gateway_model() -> Optional[str]:
+    url = f"{AI_GATEWAY_BASE_URL.rstrip('/')}{GATEWAY_MODELS_PATH}"
+    try:
+        response = requests.get(
+            url,
+            headers={"Authorization": f"Bearer {AI_GATEWAY_API_KEY}"},
+            timeout=10
+        )
+    except requests.RequestException:
+        return None
+    if response.status_code != 200:
+        return None
+    try:
+        data = response.json()
+    except ValueError:
+        return None
+    available = {
+        m.get("id") for m in data.get("data", [])
+        if isinstance(m, dict) and m.get("id")
+    }
+    for candidate in AI_GATEWAY_ALLOWED_MODELS:
+        if candidate in available:
+            return candidate
+    return None
+
+
+def _resolve_model() -> str:
+    now = time.time()
+    cached = _MODEL_CACHE.get("model")
+    if cached and (now - _MODEL_CACHE["fetched_at"]) < _MODEL_CACHE_TTL:
+        return cached
+
+    discovered = _discover_gateway_model()
+    if discovered:
+        _MODEL_CACHE["model"] = discovered
+        _MODEL_CACHE["fetched_at"] = now
+        return discovered
+
+    return AI_GATEWAY_MODEL or "company-coder"
 
 
 # ----------------------------------
@@ -94,19 +140,91 @@ PLAN_CHANGES_SYSTEM_PROMPT = (
 # ----------------------------------
 # PRIVATE HELPERS
 # ----------------------------------
+_VALID_JSON_ESCAPES = set('"\\/bfnrt')
+
+
+def _strip_code_fence(text: str) -> str:
+    """Remove a leading markdown fence and anything after its closing fence."""
+    if not text.startswith("```"):
+        return text
+
+    lines = text.splitlines()
+    body = lines[1:]
+
+    for i, line in enumerate(body):
+        if line.strip().startswith("```"):
+            body = body[:i]
+            break
+
+    return "\n".join(body)
+
+
+def _repair_json_escapes(text: str) -> str:
+    """Escape backslashes that JSON would otherwise read as invalid escapes.
+
+    Models writing file content (regexes, Windows paths, nested newlines)
+    into a JSON string sometimes emit a single backslash where JSON
+    requires two: "\\\\d" instead of "\\\\\\\\d". json.loads rejects that
+    with "Invalid \\escape". Rewriting those backslashes as literal
+    backslashes preserves the content the model intended.
+    """
+    out = []
+    i = 0
+    length = len(text)
+
+    while i < length:
+        ch = text[i]
+
+        if ch != "\\":
+            out.append(ch)
+            i += 1
+            continue
+
+        if i + 1 >= length:
+            out.append("\\\\")
+            i += 1
+            continue
+
+        nxt = text[i + 1]
+
+        if nxt == "u":
+            hex_digits = text[i + 2:i + 6]
+            if len(hex_digits) == 4 and all(
+                c in "0123456789abcdefABCDEF" for c in hex_digits
+            ):
+                out.append(text[i:i + 6])
+                i += 6
+            else:
+                out.append("\\\\")
+                i += 1
+            continue
+
+        if nxt in _VALID_JSON_ESCAPES:
+            out.append(text[i:i + 2])
+            i += 2
+            continue
+
+        out.append("\\\\")
+        i += 1
+
+    return "".join(out)
+
+
 def _safe_parse_json(text: str) -> Dict[str, Any]:
     if text is None:
         raise ValueError("Gateway returned an empty message body")
 
-    text = text.strip()
-
-    if text.startswith("```"):
-        lines = text.splitlines()
-        text = "\n".join(lines[1:-1]) if len(lines) > 2 else ""
+    text = _strip_code_fence(text.strip())
 
     try:
         return json.loads(text)
     except json.JSONDecodeError as e:
+        repaired = _repair_json_escapes(text)
+        if repaired != text:
+            try:
+                return json.loads(repaired)
+            except json.JSONDecodeError:
+                pass
         raise ValueError(
             f"Gateway returned malformed JSON ({e}). "
             f"Response head: {text[:300]}"
@@ -197,7 +315,7 @@ def parse_instruction(
     session_id: Optional[str] = None
 ) -> Dict[str, Any]:
     body = {
-        "model": AI_GATEWAY_MODEL,
+        "model": _resolve_model(),
         "messages": [
             {"role": "system", "content": PARSE_SYSTEM_PROMPT},
             {"role": "user", "content": instruction}
@@ -218,7 +336,7 @@ def chat(
     full_messages = [{"role": "system", "content": system}] + list(messages)
 
     body = {
-        "model": model or AI_GATEWAY_MODEL,
+        "model": model or _resolve_model(),
         "messages": full_messages,
         "max_tokens": AI_GATEWAY_MAX_TOKENS
     }
@@ -237,7 +355,7 @@ def plan_changes(
     )
 
     body = {
-        "model": AI_GATEWAY_MODEL,
+        "model": _resolve_model(),
         "messages": [
             {"role": "system", "content": PLAN_CHANGES_SYSTEM_PROMPT},
             {"role": "user", "content": user_content}

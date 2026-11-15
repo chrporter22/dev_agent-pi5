@@ -26,7 +26,7 @@ from github_client import (
     open_pr,
     push
 )
-from telegram_sender import _chunk_send
+from telegram_sender import _chunk_send, _sanitize_for_log
 
 # ============================================================================
 # QUEUE WORKER — core/bot/queue_worker.py
@@ -73,7 +73,7 @@ def send_telegram(chat_id, text):
             timeout=10
         )
     except Exception as e:
-        print(f"Failed to send Telegram: {e}")
+        print(f"Failed to send Telegram: {_sanitize_for_log(str(e))}")
 
 
 # ----------------------------------

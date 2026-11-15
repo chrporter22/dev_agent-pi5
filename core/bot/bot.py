@@ -19,7 +19,7 @@ from config import (
 from chat_store import ChatStore
 from github_client import get_pr, list_prs, merge_pr
 from rate_limiter import RateLimiter
-from telegram_sender import _chunk_send
+from telegram_sender import _chunk_send, _sanitize_for_log
 
 # ============================================================================
 # TELEGRAM BOT — core/bot/bot.py
@@ -46,10 +46,14 @@ offset = None
 # TELEGRAM HELPERS
 # ---------------------------
 def send_message(chat_id, text):
-    requests.post(
-        f"{BASE}/sendMessage",
-        json={"chat_id": chat_id, "text": text}
-    )
+    try:
+        requests.post(
+            f"{BASE}/sendMessage",
+            json={"chat_id": chat_id, "text": text},
+            timeout=10
+        )
+    except requests.RequestException as e:
+        print(f"Failed to send Telegram: {_sanitize_for_log(str(e))}")
 
 
 # ---------------------------
@@ -472,7 +476,7 @@ def poll():
                     handle_message(update["message"])
 
         except Exception as e:
-            print(f"Polling error: {e}")
+            print(f"Polling error: {_sanitize_for_log(str(e))}")
 
         time.sleep(1)
 
