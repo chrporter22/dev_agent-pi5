@@ -1,4 +1,4 @@
-import { useEffect, useRef, useMemo } from "react"
+import { useEffect, useRef, useMemo, useState } from "react"
 
 import Plotly, {
   type Camera,
@@ -16,11 +16,21 @@ interface Props {
   driftClassification?: string
 }
 
-const DRIFT_COLORS: Record<string, string> = {
-  normal: "#35b779",
-  watch: "#fde725",
-  high: "#ef4444",
-  unknown: "#94a3b8"
+function zscore(arr: number[]) {
+  if (arr.length < 2) return arr.map(() => 0)
+  const mean = arr.reduce((a, b) => a + b, 0) / arr.length
+  const std = Math.sqrt(arr.reduce((s, v) => s + (v - mean) ** 2, 0) / arr.length)
+  if (std === 0) return arr.map(() => 0)
+  return arr.map((v) => (v - mean) / std)
+}
+
+function viridisColor(t: number) {
+  const colors = [
+    "#440154", "#482777", "#3e4989", "#31688e", "#26828e",
+    "#1f9e89", "#35b779", "#6cce59", "#b4de2c", "#fde725"
+  ]
+  const idx = Math.min(Math.max(Math.floor(t * colors.length), 0), colors.length - 1)
+  return colors[idx]
 }
 
 export default function PCAExplorer3D({
@@ -30,28 +40,46 @@ export default function PCAExplorer3D({
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const plotRef = useRef<Figure | null>(null)
+  const [dimIndex, setDimIndex] = useState(0)
 
-  const { x, y, z, color } = useMemo(() => {
-    const pts = projection.map((row) => ({
-      x: row[0] ?? 0,
-      y: row[1] ?? 0,
-      z: row[2] ?? 0
-    }))
-
-    const baseColor = DRIFT_COLORS[driftClassification] || DRIFT_COLORS.unknown
-
-    return {
-      x: pts.map((p) => p.x),
-      y: pts.map((p) => p.y),
-      z: pts.map((p) => p.z),
-      color: pts.map(() => baseColor)
+  const dims = useMemo(() => {
+    const n = projection[0]?.length ?? 0
+    const combos: [number, number, number][] = []
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
+        for (let k = j + 1; k < n; k++) {
+          combos.push([i, j, k])
+        }
+      }
     }
-  }, [projection, driftClassification])
+    if (combos.length === 0) return [[0, 1, 2]]
+    return combos.length > 3 ? combos.slice(0, 4) : combos
+  }, [projection])
+
+  const { x, y, z, colors, sizes, zValues } = useMemo(() => {
+    const [i, j, k] = dims[dimIndex] || [0, 1, 2]
+    const xRaw = projection.map((row) => row[i] ?? 0)
+    const yRaw = projection.map((row) => row[j] ?? 0)
+    const zRaw = projection.map((row) => row[k] ?? 0)
+
+    const zScores = zscore(zRaw)
+    const colors = zScores.map((z) => viridisColor((z + 3) / 6))
+    const sizes = zScores.map((z) => 3 + Math.abs(z) * 3)
+
+    return { x: xRaw, y: yRaw, z: zRaw, colors, sizes, zValues: zScores }
+  }, [projection, dimIndex, dims])
 
   const varianceLabels = useMemo(() => {
     const total = variance.reduce((s, v) => s + v, 0) || 1
     return variance.map((v, i) => `PC${i + 1} · ${((v / total) * 100).toFixed(1)}%`)
   }, [variance])
+
+  const currentDims = dims[dimIndex] || [0, 1, 2]
+  const dimLabels = [
+    varianceLabels[currentDims[0]] || `PC${currentDims[0] + 1}`,
+    varianceLabels[currentDims[1]] || `PC${currentDims[1] + 1}`,
+    varianceLabels[currentDims[2]] || `PC${currentDims[2] + 1}`
+  ]
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -64,15 +92,20 @@ export default function PCAExplorer3D({
       y,
       z,
       marker: {
-        color,
-        size: 4,
-        opacity: 0.85,
+        color: colors,
+        size: sizes,
+        opacity: 0.9,
         line: {
-          color: "rgba(31, 41, 55, 0.8)",
-          width: 1
+          color: colors.map((c) => {
+            const r = parseInt(c.slice(1, 3), 16)
+            const g = parseInt(c.slice(3, 5), 16)
+            const b = parseInt(c.slice(5, 7), 16)
+            return `rgba(${Math.min(r + 60, 255)}, ${Math.min(g + 60, 255)}, ${Math.min(b + 60, 255)}, 0.6)`
+          }),
+          width: 2
         }
       },
-      text: varianceLabels,
+      text: zValues.map((z) => `z: ${z.toFixed(2)}`),
       hoverinfo: "text+x+y+z"
     }
 
@@ -86,7 +119,7 @@ export default function PCAExplorer3D({
       scene: {
         bgcolor: "#0b0f14",
         xaxis: {
-          title: varianceLabels[0] || "PC1",
+          title: dimLabels[0],
           gridcolor: "#1f2937",
           linecolor: "#1f2937",
           tickcolor: "#1f2937",
@@ -94,7 +127,7 @@ export default function PCAExplorer3D({
           titlefont: { size: 11, color: "#94a3b8" }
         },
         yaxis: {
-          title: varianceLabels[1] || "PC2",
+          title: dimLabels[1],
           gridcolor: "#1f2937",
           linecolor: "#1f2937",
           tickcolor: "#1f2937",
@@ -102,7 +135,7 @@ export default function PCAExplorer3D({
           titlefont: { size: 11, color: "#94a3b8" }
         },
         zaxis: {
-          title: varianceLabels[2] || "PC3",
+          title: dimLabels[2],
           gridcolor: "#1f2937",
           linecolor: "#1f2937",
           tickcolor: "#1f2937",
@@ -141,7 +174,7 @@ export default function PCAExplorer3D({
       plotRef.current.layout = layout
       Plotly.react(containerRef.current, [trace], layout, config)
     }
-  }, [x, y, z, color, varianceLabels, projection])
+  }, [x, y, z, colors, sizes, dimLabels, projection])
 
   useEffect(() => {
     let rotationTimer: ReturnType<typeof setInterval>
@@ -198,23 +231,45 @@ export default function PCAExplorer3D({
 
   const pointCount = projection.length
   const has3D = projection[0]?.length >= 3
+  const dimCount = dims.length
 
   return (
     <Card title="3D PCA Explorer">
-      <div className="mb-3 flex gap-3 items-center flex-wrap">
-        <span className="text-xs text-muted">
-          {pointCount} points · drag to rotate · scroll to zoom
-        </span>
-        {has3D && (
-          <span
-            className="text-xs px-2 py-0.5 rounded border"
-            style={{
-              borderColor: DRIFT_COLORS[driftClassification] || DRIFT_COLORS.unknown,
-              color: DRIFT_COLORS[driftClassification] || DRIFT_COLORS.unknown
-            }}
-          >
-            {driftClassification?.toUpperCase() || "UNKNOWN"}
+      <div className="mb-3 flex gap-2 items-center flex-wrap justify-between">
+        <div className="flex gap-2 items-center">
+          <span className="text-xs text-muted">
+            {pointCount} pts · z: {zValues.length > 0 ? `${zValues[0].toFixed(2)}` : "—"}…{zValues.length > 0 ? zValues[zValues.length - 1].toFixed(2) : ""}
           </span>
+          {has3D && (
+            <span
+              className="text-xs px-2 py-0.5 rounded border"
+              style={{
+                borderColor: "#35b779",
+                color: "#35b779"
+              }}
+            >
+              {driftClassification?.toUpperCase() || "UNKNOWN"}
+            </span>
+          )}
+        </div>
+        {dimCount > 1 && (
+          <div className="flex gap-1">
+            {dims.map((d, i) => (
+              <button
+                key={i}
+                onClick={() => setDimIndex(i)}
+                className={`
+                  text-xs px-2 py-1 rounded border transition-all
+                  ${i === dimIndex
+                    ? "border-[#35b779] bg-[#35b779]/20 text-[#35b779]"
+                    : "border-border text-muted hover:border-[#35b779]/50 hover:text-[#35b779]"
+                  }
+                `}
+              >
+                {`PC${d[0] + 1}-PC${d[1] + 1}-PC${d[2] + 1}`}
+              </button>
+            ))}
+          </div>
         )}
       </div>
       {!has3D && projection.length > 0 && (

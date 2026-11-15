@@ -282,7 +282,7 @@ Optional:
 - `CHAT_HISTORY_MAX_TURNS` — per-chat history depth (default 20).
 - `TELEGRAM_MAX_CHARS` — chunk size for Telegram replies (default 3800).
 - `AI_GATEWAY_TIMEOUT` — per-request HTTP timeout in seconds (default 150). Must exceed the longest observed call latency.
-- `AI_GATEWAY_MAX_TOKENS` — max tokens per call (default 8000). Without it the gateway's routing-tier cap truncates structured responses into unparseable JSON.
+- `AI_GATEWAY_MAX_TOKENS` — max tokens per call (default 2000000). The gateway accepts any value up to 2M. Lower values (e.g. 32500) reduce cost when plans are short.
 - `AI_GATEWAY_ALLOWED_MODELS` — comma-separated models `/model` accepts (default `company-coder`).
 - `LOG_LEVEL` / `ML_LOG_LEVEL` — `info` (default) or `debug` / `INFO`.
 - `BOT_VERSION` — image tag for `openclaw/bot` (default `1.0.0`).
@@ -383,7 +383,7 @@ In Telegram:
 | `host.docker.internal` does not resolve | Docker on Linux needs an explicit host mapping | The compose file sets `extra_hosts: ["host.docker.internal:host-gateway"]`; if you changed it, use `172.17.0.1` or the host LAN IP instead |
 | Gateway returns HTTP 403 | The key is not scoped to the model being requested | Re-mint with `~/ai-gateway/scripts/create-dev-key.sh`; check the key's `models` list matches `AI_GATEWAY_MODEL` |
 | Gateway returns HTTP 400 "Invalid model name" | `AI_GATEWAY_MODEL` names a model the orchestrator does not serve | The orchestrator serves `company-coder` only |
-| Plan output fails to parse | Response truncated at the token cap | Raise `AI_GATEWAY_MAX_TOKENS` (default 8000) |
+| Plan output fails to parse | Response truncated at the token cap | Raise `AI_GATEWAY_MAX_TOKENS` (default 2000000) |
 | Call times out | Client timeout below the gateway's own upstream timeout | Raise `AI_GATEWAY_TIMEOUT` (default 150) |
 | `git push` rejected | `GITHUB_TOKEN` missing `contents:write`, or not authorized on target repo | Regenerate fine-grained PAT with the right scopes |
 | PR open rejected | Token missing `pull_requests:write`, branch protection blocks the bot, or repo archived | Loosen branch protection for bot branches; check token scopes |

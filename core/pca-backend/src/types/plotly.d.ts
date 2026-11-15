@@ -4,7 +4,7 @@ declare module "plotly.js-dist-min" {
     size?: number | number[]
     opacity?: number | number[]
     line?: {
-      color?: string
+      color?: string | string[]
       width?: number
     }
   }

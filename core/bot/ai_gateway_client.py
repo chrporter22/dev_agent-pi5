@@ -293,7 +293,11 @@ def _call_with_retry(
             content = _request_gateway(body, session_id)
             return parse_fn(content)
         except GatewayHttpError as e:
-            if e.status_code < 500 and e.status_code != 429:
+            if (
+                e.status_code < 500
+                and e.status_code != 429
+                and e.status_code != 403
+            ):
                 raise
             last_error = e
         except Exception as e:
@@ -361,7 +365,8 @@ def plan_changes(
             {"role": "user", "content": user_content}
         ],
         "response_format": {"type": "json_object"},
-        "max_tokens": AI_GATEWAY_MAX_TOKENS
+        "max_tokens": AI_GATEWAY_MAX_TOKENS,
+        "reasoning_effort": "none"
     }
 
     return _call_with_retry(body, _safe_parse_json, session_id)

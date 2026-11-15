@@ -19,15 +19,31 @@ export default function DashboardHeader({
   return (
     <header className="mb-8">
 
-      <h1
+      <div
         className="
-        text-3xl
+        text-viridis-600
         font-bold
-        mb-4
-        text-text
+        text-5xl
+        leading-none
+        mb-2
+        tracking-[0.3em]
+        select-none
         "
       >
-        Dev Agent PI5 Dashboard
+        PCA
+      </div>
+
+      <h1
+        className="
+        text-sm
+        font-normal
+        mb-4
+        text-muted
+        tracking-widest
+        uppercase
+        "
+      >
+        Dev Agent Pi5 Dashboard
       </h1>
 
       <div className="flex gap-3">

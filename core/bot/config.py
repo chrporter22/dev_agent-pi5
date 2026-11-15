@@ -13,7 +13,7 @@ AI_GATEWAY_BASE_URL = os.getenv("AI_GATEWAY_BASE_URL")
 AI_GATEWAY_API_KEY = os.getenv("AI_GATEWAY_API_KEY")
 AI_GATEWAY_MODEL = os.getenv("AI_GATEWAY_MODEL", "company-coder")
 AI_GATEWAY_TIMEOUT = int(os.getenv("AI_GATEWAY_TIMEOUT", "150"))
-AI_GATEWAY_MAX_TOKENS = int(os.getenv("AI_GATEWAY_MAX_TOKENS", "8000"))
+AI_GATEWAY_MAX_TOKENS = int(os.getenv("AI_GATEWAY_MAX_TOKENS", "2000000"))
 AI_GATEWAY_ALLOWED_MODELS = [
     m.strip()
     for m in os.getenv("AI_GATEWAY_ALLOWED_MODELS", "company-coder").split(",")
