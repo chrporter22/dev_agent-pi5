@@ -9,7 +9,7 @@
 #   - bot     : chat/queue/job/rate/worker keys (read+write)
 #   - worker  : chat/queue/job/worker keys (read+write)
 #   - ml      : pca/drift/risk/model/ml keys (read+write)
-#   - nodeapi : pca/drift/risk/model + ml heartbeat keys (READ ONLY)
+#   - nodeapi : pca/drift/risk/model + ml heartbeat + job/session keys (READ ONLY)
 #
 # Rule order matters: `-@all` must precede the `+cmd` grants,
 # otherwise the trailing deny wipes the earlier grants.
@@ -23,4 +23,4 @@ user worker on >${REDIS_PASSWORD_WORKER} ~chat:* ~queue:* ~job:* ~jobs:* ~worker
 
 user ml on >${REDIS_PASSWORD_ML} ~pca:* ~drift:* ~risk:* ~model:* ~ml:* &* +@all -flushdb -flushall -keys -config -shutdown -debug
 
-user nodeapi on >${REDIS_PASSWORD_NODEAPI} ~pca:* ~drift:* ~risk:* ~model:* ~ml:heartbeat ~ml:last_run &* -@all +get +lrange +ping
+user nodeapi on >${REDIS_PASSWORD_NODEAPI} ~pca:* ~drift:* ~risk:* ~model:* ~ml:heartbeat ~ml:last_run ~job:* ~jobs:* &* -@all +get +lrange +hmget +zrevrange +ping

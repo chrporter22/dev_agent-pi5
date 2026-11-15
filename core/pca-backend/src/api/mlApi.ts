@@ -2,7 +2,8 @@ import axios from "axios"
 
 import {
   PcaSummary,
-  HistoryPoint
+  HistoryPoint,
+  Session
 } from "../types/ml"
 
 const api = axios.create({
@@ -30,6 +31,16 @@ export async function getHistory() {
     )
 
   return data
+}
+
+export async function getSessions() {
+
+  const { data } =
+    await api.get<{ sessions: Session[] }>(
+      "/sessions"
+    )
+
+  return data.sessions
 }
 
 export default api

@@ -4,7 +4,8 @@ import redis from "../redis/client"
 
 import {
   getJsonKey,
-  getStringKey
+  getStringKey,
+  getHashFields
 } from "../utils/redisHelper"
 
 const router = express.Router()
@@ -156,6 +157,64 @@ router.get("/risk", async (_, res) => {
     prediction,
     confidence: Number(confidence || 0)
   })
+})
+
+// ----------------------------------
+// SESSION LOGS (recent jobs)
+// ----------------------------------
+
+router.get("/sessions", async (_, res) => {
+
+  try {
+    const jobIds = await redis.zrevrange(
+      "jobs:index",
+      0,
+      19
+    )
+
+    const sessions = await Promise.all(
+      jobIds.map(async (jobId) => {
+        const fields = await getHashFields(
+          `job:${jobId}`,
+          [
+            "status",
+            "type",
+            "step",
+            "created_at",
+            "updated_at",
+            "result",
+            "error",
+            "pr_url",
+            "chat_id",
+            "feature",
+            "text"
+          ]
+        )
+        return {
+          id: jobId.slice(0, 8),
+          status: fields.status || "unknown",
+          type: fields.type || "build",
+          step: fields.step || null,
+          createdAt: fields.created_at ? Number(fields.created_at) : null,
+          updatedAt: fields.updated_at ? Number(fields.updated_at) : null,
+          result: fields.result || null,
+          error: fields.error || null,
+          prUrl: fields.pr_url || null,
+          chatId: fields.chat_id || null,
+          feature: fields.feature || null,
+          text: fields.text || null
+        }
+      })
+    )
+
+    return res.json({ sessions })
+
+  } catch (err) {
+
+    return res.status(500).json({
+      error: "Failed to fetch session logs"
+    })
+  }
 })
 
 export default router

@@ -10,10 +10,11 @@ import RiskCard from "../components/cards/RiskCard"
 import WorkerCard from "../components/cards/WorkerCard"
 import VarianceSummaryCard from "../components/cards/VarianceSummaryCard"
 
-import PCAExplorer from "../components/charts/PCAExplorer"
+import PCAExplorer3D from "../components/charts/PCAExplorer3D"
 import VarianceChart from "../components/charts/VarianceChart"
 import EigenvalueChart from "../components/charts/EigenvalueChart"
 import HistoryTimeline from "../components/charts/HistoryTimeline"
+import SessionLogs from "../components/charts/SessionLogs"
 
 export default function Dashboard() {
 
@@ -108,8 +109,10 @@ export default function Dashboard() {
 
       {/* PCA EXPLORER */}
       <section className="mb-6">
-        <PCAExplorer
+        <PCAExplorer3D
           projection={data.projection}
+          variance={data.variance}
+          driftClassification={data.driftClassification}
         />
       </section>
 
@@ -135,10 +138,15 @@ export default function Dashboard() {
       </section>
 
       {/* HISTORY */}
-      <section>
+      <section className="mb-6">
         <HistoryTimeline
           history={history ?? []}
         />
+      </section>
+
+      {/* SESSION LOGS */}
+      <section>
+        <SessionLogs />
       </section>
 
     </DashboardLayout>

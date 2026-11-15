@@ -3,7 +3,6 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
@@ -11,17 +10,17 @@
     "start": "node serve.mjs",
     "lint": "eslint ."
   },
-
   "dependencies": {
     "@tanstack/react-query": "^5.80.6",
     "axios": "^1.10.0",
+    "plotly.js-dist-min": "^3.7.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-zoom-pan-pinch": "^3.7.0",
     "recharts": "^2.15.4"
   },
-
   "devDependencies": {
+    "@types/plotly.js": "^2.35.18",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.4.1",

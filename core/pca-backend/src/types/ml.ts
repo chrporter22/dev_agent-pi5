@@ -37,3 +37,18 @@ export interface HistoryPoint {
 
   risk?: string
 }
+
+export interface Session {
+  id: string
+  status: string
+  type: string
+  step: string | null
+  createdAt: number | null
+  updatedAt: number | null
+  result: string | null
+  error: string | null
+  prUrl: string | null
+  chatId: string | null
+  feature: string | null
+  text: string | null
+}

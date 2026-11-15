@@ -19,30 +19,15 @@ export default function DashboardHeader({
   return (
     <header className="mb-8">
 
-      <pre
-        className="
-        text-viridis-600
-        text-xs
-        mb-4
-        "
-      >
-{`
- ██████╗  ██████╗ █████╗
- ██╔══██╗██╔════╝██╔══██╗
- ██████╔╝██║     ███████║
- ██╔═══╝ ██║     ██╔══██║
- ██║     ╚██████╗██║  ██║
-`}
-      </pre>
-
       <h1
         className="
         text-3xl
         font-bold
         mb-4
+        text-text
         "
       >
-        OpenClaw PCA Monitoring
+        Dev Agent PI5 Dashboard
       </h1>
 
       <div className="flex gap-3">
