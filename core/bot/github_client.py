@@ -30,8 +30,16 @@ def _run_git(args: List[str], cwd: str) -> str:
     )
 
     if result.returncode != 0:
+        redacted = [
+            a.replace(GITHUB_TOKEN, "<REDACTED:TOKEN>") if GITHUB_TOKEN else a
+            for a in args
+        ]
+        stderr = (
+            result.stderr.replace(GITHUB_TOKEN, "<REDACTED:TOKEN>")
+            if GITHUB_TOKEN else result.stderr
+        )
         raise RuntimeError(
-            f"git {' '.join(args)} failed: {result.stderr.strip()}"
+            f"git {' '.join(redacted)} failed: {stderr.strip()}"
         )
 
     return result.stdout.strip()

@@ -2,6 +2,7 @@ import json
 import os
 import time
 import traceback
+from typing import Any, Dict, Optional
 
 import redis
 import requests
@@ -152,7 +153,8 @@ def _gather_repo_context(sandbox_dir: str) -> dict:
 
     return {
         "files": sorted(file_list)[:200],
-        "language": _detect_language(file_list)
+        "language": _detect_language(file_list),
+        "conventions": _gather_conventions(sandbox_dir),
     }
 
 
@@ -168,6 +170,79 @@ def _detect_language(file_list) -> str:
     if any(f.endswith((".java", ".kt")) for f in file_list):
         return "java"
     return "unknown"
+
+
+def _read_capped(path: str, limit: int) -> Optional[str]:
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            return fh.read(limit)
+    except (FileNotFoundError, IsADirectoryError, PermissionError, OSError):
+        return None
+
+
+def _gather_ai_index(
+    sandbox_dir: str,
+    sub: str,
+    max_files: int
+) -> Dict[str, str]:
+    base = os.path.join(sandbox_dir, ".ai", sub)
+    if not os.path.isdir(base):
+        return {}
+
+    out: Dict[str, str] = {}
+    try:
+        entries = sorted(os.listdir(base))
+    except OSError:
+        return {}
+
+    for entry in entries:
+        path = os.path.join(base, entry)
+        if not os.path.isfile(path):
+            continue
+        snippet = _read_capped(path, 200)
+        if snippet is None:
+            continue
+        first_line = snippet.splitlines()[0] if snippet else ""
+        out[entry] = first_line
+        if len(out) >= max_files:
+            break
+    return out
+
+
+def _gather_workflows(sandbox_dir: str) -> Dict[str, str]:
+    base = os.path.join(sandbox_dir, ".github", "workflows")
+    if not os.path.isdir(base):
+        return {}
+
+    out: Dict[str, str] = {}
+    try:
+        entries = sorted(os.listdir(base))
+    except OSError:
+        return {}
+
+    for entry in entries:
+        if not entry.endswith((".yml", ".yaml")):
+            continue
+        content = _read_capped(os.path.join(base, entry), 4096)
+        if content is not None:
+            out[entry] = content
+    return out
+
+
+def _gather_conventions(sandbox_dir: str) -> Dict[str, Any]:
+    return {
+        "agents_md": _read_capped(
+            os.path.join(sandbox_dir, "AGENTS.md"),
+            4096
+        ),
+        "claude_md": _read_capped(
+            os.path.join(sandbox_dir, "CLAUDE.md"),
+            4096
+        ),
+        "ai_decisions": _gather_ai_index(sandbox_dir, "decisions", 10),
+        "ai_sessions": _gather_ai_index(sandbox_dir, "sessions", 5),
+        "workflows": _gather_workflows(sandbox_dir),
+    }
 
 
 def _apply_changes(sandbox_dir: str, files: list) -> None:
