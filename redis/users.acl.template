@@ -23,4 +23,4 @@ user worker on >${REDIS_PASSWORD_WORKER} ~chat:* ~queue:* ~job:* ~jobs:* ~worker
 
 user ml on >${REDIS_PASSWORD_ML} ~pca:* ~drift:* ~risk:* ~model:* ~ml:* &* +@all -flushdb -flushall -keys -config -shutdown -debug
 
-user nodeapi on >${REDIS_PASSWORD_NODEAPI} ~pca:* ~drift:* ~risk:* ~model:* ~ml:heartbeat ~ml:last_run ~job:* ~jobs:* &* -@all +get +lrange +hmget +zrevrange +ping
+user nodeapi on >${REDIS_PASSWORD_NODEAPI} ~pca:* ~drift:* ~risk:* ~model:* ~ml:heartbeat ~ml:last_run ~job:* ~jobs:* ~queue:jobs &* -@all +get +lrange +hmget +zrevrange +zrem +hset +rpush +ping

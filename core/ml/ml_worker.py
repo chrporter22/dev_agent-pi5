@@ -18,7 +18,10 @@ from config import (
     ML_DATA_SOURCE,
     ML_SYNTHETIC_DIM,
     ML_SYNTHETIC_SAMPLES,
-    ML_WORKER_SLEEP
+    ML_WORKER_SLEEP,
+    ORIGINAL_FEATURES,
+    ORIGINAL_FEATURE_NAMES,
+    get_encoding_map
 )
 
 
@@ -54,60 +57,102 @@ def _heartbeat():
 # --------------------------------------------------
 # SYNTHETIC DATA SOURCE (development / bring-up)
 # --------------------------------------------------
+# Each cycle samples one value per ORIGINAL_FEATURE per row, encodes it
+# (numeric → identity, onehot → one-hot), and concatenates the result.
+# The encoding is deterministic per (cycle, row, feature) so the data shape
+# is stable across cycles — only the values evolve.
+# --------------------------------------------------
 
 _SYNTHETIC_BASE_SEED = 42
-_SYNTHETIC_LATENT_DIMS = 3
 _SYNTHETIC_NOISE_STD = 0.1
 _SYNTHETIC_DRIFT_AMPLITUDE = 0.5
 _SYNTHETIC_DRIFT_PERIOD = 30
 
+# A handful of feature names whose onehot / numeric values carry the slow
+# drift signal.  These rotate around their domain sinusoidally, so PCA
+# recovers a stable latent structure with a periodic centroid shift.
+_DRIFT_FEATURES = [
+    "model",
+    "feature",
+    "priority",
+    "status",
+    "error_type"
+]
+
 _cycle_counter = 0
+_synthetic_rng = None
+
+
+def _sample_onehot(values, rng, drift_phase=0.0):
+    """Pick one category.  `drift_phase` smoothly rotates the choice so
+    some categories dominate at different points in the cycle."""
+    n = len(values)
+    if drift_phase == 0.0:
+        idx = int(rng.integers(0, n))
+    else:
+        # Sinusoidally-biased categorical: logit = sin(phase + k*2π/n)
+        logits = np.array([
+            np.sin(drift_phase + k * 2.0 * np.pi / n)
+            for k in range(n)
+        ])
+        probs = np.exp(logits - logits.max())
+        probs /= probs.sum()
+        idx = int(rng.choice(n, p=probs))
+    out = [0.0] * n
+    out[idx] = 1.0
+    return out
+
+
+def _sample_numeric(mean=0.0, std=1.0, drift_phase=0.0, rng=None):
+    """Sample a single numeric value with optional sinusoidal mean drift."""
+    effective_mean = mean + _SYNTHETIC_DRIFT_AMPLITUDE * np.sin(drift_phase)
+    return float(rng.normal(effective_mean, std))
 
 
 def _load_synthetic_embeddings():
-    """Persistent-RNG seeded stream for development.
+    """Generate a (n × d) batch by sampling and encoding each ORIGINAL_FEATURE.
 
-    A fixed random projection matrix W is generated once.  Each cycle draws
-    fresh latent values with a sinusoidal drift on the centroid, so the
-    drift score oscillates smoothly instead of jumping.  RNG state is
-    preserved across calls, so the draws evolve naturally cycle to cycle.
+    The result is a list of lists of floats, length n rows × d cols, where
+    d == ML_SYNTHETIC_DIM.  Each row represents one "observation" with
+    semantically meaningful per-feature values that the dashboard can
+    aggregate back to original feature names.
     """
     global _cycle_counter
     global _synthetic_rng
-    global _synthetic_projection
 
     _cycle_counter += 1
 
+    if _synthetic_rng is None:
+        _synthetic_rng = np.random.default_rng(_SYNTHETIC_BASE_SEED)
+
+    rng = _synthetic_rng
     n = ML_SYNTHETIC_SAMPLES
     d = ML_SYNTHETIC_DIM
 
-    # Lazy init: fixed projection matrix, persistent RNG
-    if _cycle_counter == 1:
-        _synthetic_rng = np.random.default_rng(_SYNTHETIC_BASE_SEED)
-        _synthetic_projection = _synthetic_rng.standard_normal(
-            (_SYNTHETIC_LATENT_DIMS, d)
-        )
-
-    rng = _synthetic_rng
-
-    # Low-rank latent
-    z = rng.standard_normal((n, _SYNTHETIC_LATENT_DIMS))
-
-    # Sinusoidal drift on the latent centroid
+    rows = []
     phase = 2.0 * np.pi * _cycle_counter / _SYNTHETIC_DRIFT_PERIOD
-    z += _SYNTHETIC_DRIFT_AMPLITUDE * np.sin(phase)
 
-    noise = rng.normal(0.0, _SYNTHETIC_NOISE_STD, (n, d))
+    for _ in range(n):
+        row = []
+        for feat in ORIGINAL_FEATURES:
+            name = feat["name"]
+            if feat["type"] == "numeric":
+                drift = phase if name in _DRIFT_FEATURES else 0.0
+                row.append(_sample_numeric(drift_phase=drift, rng=rng))
+            else:
+                drift = phase if name in _DRIFT_FEATURES else 0.0
+                row.extend(_sample_onehot(feat["values"], rng, drift_phase=drift))
+        rows.append(row)
 
-    x = z @ _synthetic_projection + noise
-    # Centre each batch so centroid drift is the only signal
+    x = np.array(rows, dtype=np.float32)
+
+    # Light noise so PCA has a stochastic component to factor through
+    noise = rng.normal(0.0, _SYNTHETIC_NOISE_STD, (n, d)).astype(np.float32)
+    x = x + noise
+    # Centre per batch so the drift signal sits in the mean offset
     x -= x.mean(axis=0, keepdims=True)
 
-    return x.astype(np.float32).tolist()
-
-
-_synthetic_rng = None
-_synthetic_projection = None
+    return x.tolist()
 
 
 # --------------------------------------------------
@@ -188,6 +233,24 @@ def run_cycle():
     store_value(
         "pca:total_variance",
         pca_result["total_variance_explained"]
+    )
+
+    # ----------------------------------
+    # ORIGINAL FEATURE METADATA
+    # ----------------------------------
+    # Names and encoding map are static across cycles (they describe the
+    # synthetic schema), but we refresh them every cycle so a config change
+    # is picked up on the next iteration without a worker restart.
+    # ----------------------------------
+
+    store_json(
+        "pca:feature_names",
+        list(ORIGINAL_FEATURE_NAMES)
+    )
+
+    store_json(
+        "pca:encoding_map",
+        get_encoding_map()
     )
 
     # ----------------------------------

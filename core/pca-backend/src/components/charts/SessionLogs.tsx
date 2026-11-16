@@ -1,4 +1,5 @@
 import { useSessions } from "../../hooks/useSessions"
+import { useRetrySession } from "../../hooks/useRetrySession"
 import Card from "../ui/Card"
 
 function statusColor(status: string) {
@@ -30,8 +31,62 @@ function truncate(text: string | null, max: number) {
   return text.length > max ? text.slice(0, max) + "…" : text
 }
 
+interface RetryButtonProps {
+  jobId: string
+  onRetried?: () => void
+}
+
+function RetryButton({ jobId, onRetried }: RetryButtonProps) {
+  const retry = useRetrySession()
+
+  const handleClick = () => {
+    retry.mutate(jobId, {
+      onSuccess: () => onRetried?.()
+    })
+  }
+
+  const label = retry.isPending
+    ? "Re-queuing…"
+    : retry.isError
+      ? "Retry failed"
+      : retry.isSuccess
+        ? "Re-queued"
+        : "Retry"
+
+  const classes = `
+    text-[10px]
+    font-mono
+    uppercase
+    tracking-wider
+    px-2
+    py-1
+    rounded
+    border
+    transition-colors
+    ${
+      retry.isSuccess
+        ? "border-[#35b779] text-[#35b779]"
+        : retry.isError
+          ? "border-red-500 text-red-400"
+          : retry.isPending
+            ? "border-muted text-muted cursor-wait"
+            : "border-[#35b779] text-[#35b779] hover:bg-[#35b779] hover:text-[#0b0f14]"
+    }
+  `
+
+  return (
+    <button
+      onClick={handleClick}
+      disabled={retry.isPending || retry.isSuccess}
+      className={classes}
+    >
+      {label}
+    </button>
+  )
+}
+
 export default function SessionLogs() {
-  const { data: sessions, isLoading, error } = useSessions()
+  const { data: sessions, isLoading, error, refetch } = useSessions()
 
   return (
     <Card title="Session Logs">
@@ -54,6 +109,7 @@ export default function SessionLogs() {
             const resultText = session.error
               ? truncate(session.error, 100)
               : truncate(session.result, 100)
+            const isFailed = session.status === "failed"
 
             return (
               <div
@@ -102,6 +158,11 @@ export default function SessionLogs() {
                     <span className="text-muted">
                       {formatTime(session.createdAt)}
                     </span>
+                    {isFailed && (
+                      <span className="ml-auto">
+                        <RetryButton jobId={session.id} onRetried={refetch} />
+                      </span>
+                    )}
                   </div>
 
                   {detail && (

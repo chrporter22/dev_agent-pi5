@@ -1,4 +1,5 @@
 import json
+import re
 import time
 import uuid
 
@@ -367,7 +368,15 @@ def handle_message(msg):
         if len(parts) == 2:
             queue_build(chat_id, None, parts[1].strip())
         elif len(parts) >= 3 and "/" in parts[1]:
-            queue_build(chat_id, parts[1].strip(), parts[2].strip())
+            repo_arg = parts[1].strip()
+            if not re.fullmatch(r"[A-Za-z0-9._/-]+", repo_arg):
+                send_message(
+                    chat_id,
+                    "Repo must not contain whitespace; send "
+                    "/build owner/repo <feature> on one line."
+                )
+                return
+            queue_build(chat_id, repo_arg, parts[2].strip())
         else:
             send_message(chat_id, "Usage: /build [owner/repo] <feature>")
         return

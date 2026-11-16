@@ -43,4 +43,14 @@ export async function getSessions() {
   return data.sessions
 }
 
+export async function retrySession(jobId: string) {
+
+  const { data } =
+    await api.post<{ ok: boolean; jobId: string; requeuedAt: number }>(
+      `/sessions/${jobId}/retry`
+    )
+
+  return data
+}
+
 export default api

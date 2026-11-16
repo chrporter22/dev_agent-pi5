@@ -14,6 +14,10 @@ export interface PcaSummary {
 
   std: number[]
 
+  featureNames?: string[]
+
+  encodingMap?: Record<string, number[]>
+
   drift: number
 
   driftClassification?: string

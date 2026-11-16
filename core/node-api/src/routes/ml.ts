@@ -28,7 +28,9 @@ router.get("/pca/summary", async (_, res) => {
       std,
       drift,
       risk,
-      confidence
+      confidence,
+      featureNames,
+      encodingMap
     ] = await Promise.all([
       getJsonKey("pca:latest"),
       getJsonKey("pca:components"),
@@ -39,7 +41,9 @@ router.get("/pca/summary", async (_, res) => {
       getJsonKey("pca:std"),
       getStringKey("drift:score"),
       getStringKey("model:prediction"),
-      getStringKey("model:confidence")
+      getStringKey("model:confidence"),
+      getJsonKey("pca:feature_names"),
+      getJsonKey("pca:encoding_map")
     ])
 
     return res.json({
@@ -50,6 +54,8 @@ router.get("/pca/summary", async (_, res) => {
       totalVariance: Number(totalVariance || 0),
       mean,
       std,
+      featureNames: featureNames || null,
+      encodingMap: encodingMap || null,
       drift: Number(drift || 0),
       risk,
       confidence: Number(confidence || 0)
@@ -213,6 +219,98 @@ router.get("/sessions", async (_, res) => {
 
     return res.status(500).json({
       error: "Failed to fetch session logs"
+    })
+  }
+})
+
+// ----------------------------------
+// RETRY FAILED JOB
+// ----------------------------------
+// Re-queue a failed job so the worker re-processes it.  Validates that the
+// job exists, is in `failed` status, and reconstructs the queue payload from
+// the job hash.  Resets status to `queued`, clears the error, and removes
+// the job from `jobs:failed`.
+//
+// Requires nodeapi ACL: +rpush +hset +zrem (job/queue/jobs keys).  This is a
+// deliberate scope expansion of the read-only rule, restricted to a single
+// narrow operation.
+// ----------------------------------
+
+router.post("/sessions/:id/retry", async (req, res) => {
+
+  const jobId = req.params.id
+
+  try {
+
+    const jobKey = `job:${jobId}`
+
+    const fields = await getHashFields(
+      jobKey,
+      [
+        "status",
+        "type",
+        "chat_id",
+        "feature",
+        "text",
+        "session_id",
+        "created_at"
+      ]
+    )
+
+    if (!fields.status) {
+
+      return res.status(404).json({
+        error: "Job not found"
+      })
+    }
+
+    if (fields.status !== "failed") {
+
+      return res.status(409).json({
+        error: `Job is '${fields.status}', not 'failed'`
+      })
+    }
+
+    const jobPayload = {
+      id: jobId,
+      type: fields.type || "build",
+      chat_id: fields.chat_id || null,
+      feature: fields.feature || "",
+      text: fields.text || "",
+      session_id: fields.session_id || null,
+      retries: 0,
+      created_at: fields.created_at || Math.floor(Date.now() / 1000)
+    }
+
+    const now = Math.floor(Date.now() / 1000)
+
+    const pipe = redis.pipeline()
+
+    pipe.rpush(
+      "queue:jobs",
+      JSON.stringify(jobPayload)
+    )
+    pipe.hset(jobKey, {
+      status: "queued",
+      error: "",
+      updated_at: now
+    })
+    pipe.zrem("jobs:failed", jobId)
+
+    await pipe.exec()
+
+    return res.json({
+      ok: true,
+      jobId,
+      requeuedAt: now
+    })
+
+  } catch (err) {
+
+    console.error(err)
+
+    return res.status(500).json({
+      error: "Failed to retry job"
     })
   }
 })

@@ -1,4 +1,5 @@
 import Badge from "../ui/Badge"
+import { PCA_ASCII } from "./pcaAscii"
 
 interface Props {
   heartbeat?: number
@@ -19,28 +20,30 @@ export default function DashboardHeader({
   return (
     <header className="mb-8">
 
-      <div
+      <pre
         className="
-        text-viridis-600
-        font-bold
-        text-5xl
-        leading-none
-        mb-2
-        tracking-[0.3em]
-        select-none
+          font-mono
+          text-viridis-600
+          text-lg
+          md:text-xl
+          xl:text-2xl
+          leading-none
+          mb-2
+          select-none
+          overflow-x-auto
         "
       >
-        PCA
-      </div>
+        {PCA_ASCII}
+      </pre>
 
       <h1
         className="
-        text-sm
-        font-normal
-        mb-4
-        text-muted
-        tracking-widest
-        uppercase
+          text-sm
+          font-normal
+          mb-4
+          text-muted
+          tracking-widest
+          uppercase
         "
       >
         Dev Agent Pi5 Dashboard

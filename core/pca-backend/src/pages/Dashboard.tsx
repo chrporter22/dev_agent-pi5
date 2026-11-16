@@ -13,6 +13,7 @@ import VarianceSummaryCard from "../components/cards/VarianceSummaryCard"
 import PCAExplorer3D from "../components/charts/PCAExplorer3D"
 import VarianceChart from "../components/charts/VarianceChart"
 import EigenvalueChart from "../components/charts/EigenvalueChart"
+import LoadingsChart from "../components/charts/LoadingsChart"
 import HistoryTimeline from "../components/charts/HistoryTimeline"
 import SessionLogs from "../components/charts/SessionLogs"
 
@@ -133,6 +134,18 @@ export default function Dashboard() {
 
         <EigenvalueChart
           eigenvalues={data.eigenvalues}
+        />
+
+      </section>
+
+      {/* FEATURE CONTRIBUTIONS */}
+      <section className="mb-6">
+
+        <LoadingsChart
+          components={data.components}
+          variance={data.variance}
+          encodingMap={data.encodingMap}
+          featureNames={data.featureNames}
         />
 
       </section>
