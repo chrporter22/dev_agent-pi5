@@ -35,15 +35,39 @@ interface Props {
   history: HistoryPoint[]
 }
 
+function normalize(entry: unknown): HistoryPoint {
+
+  if (Array.isArray(entry)) {
+
+    return {
+      projection: entry as number[][]
+    }
+  }
+
+  if (
+    entry
+    && typeof entry === "object"
+    && Array.isArray((entry as HistoryPoint).projection)
+  ) {
+
+    return entry as HistoryPoint
+  }
+
+  return {
+    projection: []
+  }
+}
+
 export default function HistoryTimeline({
   history
 }: Props) {
 
   const data =
     history.map((item, index) => {
-      const norm = centroidL2Norm(item.projection)
-      const ts = item.timestamp
-        ? new Date(item.timestamp * 1000)
+      const point = normalize(item)
+      const norm = centroidL2Norm(point.projection)
+      const ts = point.timestamp
+        ? new Date(point.timestamp * 1000)
         : null
       return {
         index,

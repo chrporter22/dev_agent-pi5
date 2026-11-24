@@ -194,9 +194,19 @@ def run_cycle():
         projection
     )
 
+    history_point = {
+        "timestamp": int(time.time()),
+        "projection": projection,
+        "drift": None,
+        "risk": None
+    }
+
+    # Drift + risk are filled in below; we update the head entry once
+    # they exist so the latest point carries the cycle's scores.
+
     redis_client.lpush(
         "pca:history",
-        json.dumps(projection)
+        json.dumps(history_point)
     )
 
     redis_client.ltrim(
@@ -272,6 +282,26 @@ def run_cycle():
     store_value("model:prediction", risk_label)
     store_value("model:confidence", confidence)
     store_value("risk:latest", risk_label)
+
+    # ----------------------------------
+    # UPDATE HISTORY HEAD WITH DRIFT / RISK
+    # ----------------------------------
+    # The head of pca:history was pushed before drift/risk were ready;
+    # now overwrite it with the complete record.
+    # ----------------------------------
+
+    updated_head = {
+        "timestamp": int(time.time()),
+        "projection": projection,
+        "drift": drift_score,
+        "risk": risk_label
+    }
+
+    redis_client.lset(
+        "pca:history",
+        0,
+        json.dumps(updated_head)
+    )
 
     # ----------------------------------
     # HEARTBEAT
